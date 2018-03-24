@@ -9,6 +9,7 @@ import os
 import pandas as pd
 import numpy  as np
 import  matplotlib.pyplot as plt
+from scipy import optimize
 import datetime
 import time
 import talib
@@ -304,16 +305,26 @@ def CaclMainFlow(CapFlow):
         nLastWeeks最少程序周期数
         均线单调递增、多头排列
 '''
-def IsCAPMaUp(data,maList,nLastWeeks):
+def main_cap_up(data,maList,nLastWeeks):
     bRet=True
     ma=[]
-    CaclCount=sum(maList)+nLastWeeks+2
+    CaclCount=sum(maList)*2+nLastWeeks
+    count=len(data)
 
-    while len(maList)>=3 and len(data)>CaclCount:
+    while len(maList)>=3 and count>CaclCount:
+        tmp=data[-CaclCount:]
          # 计算每个周期的主力资金流变化情况
-        mainflow=data['BigBuy']+data['HugeBuy']-data['BigSell']-data['HugeSell']
+        mainflow=tmp['BigBuy']+tmp['HugeBuy']-tmp['BigSell']-tmp['HugeSell']
+
+        flow = mainflow.values
+        # 累计主力总资金流
+        total_flow = [flow[0]]
+        for i in range(1, CaclCount):
+            total_flow.append(total_flow[i - 1] + flow[i])
+
 
         #分析资金流变化情况的均线趋势  按列排序并进行比较
+        #'''
         for week in maList:
             tmp=mainflow.rolling(week).mean().tolist()[-nLastWeeks:]
 
@@ -322,20 +333,25 @@ def IsCAPMaUp(data,maList,nLastWeeks):
                 break
 
             ma.append(tmp[-nLastWeeks-1:])
+        #'''
 
-        '''
+        #'''
+        #判断资金流近期趋势
         if bRet:
-            #分析资金流变化情况的均线趋势  必须多头趋势
-            for index in range(nLastWeeks):
-                for i in range(1, len(maList)):
-                    if ma[i][index] < ma[i - 1][index]:
-                        bRet = False
-                        break
+            show=False
+            trends=cacl_cap_trend(total_flow,count-1,0,maList[1],show)
+            total=0
+            up=0
+            for trend in trends:
+                 total+=len(trend)
+                 up+=trend.count(True)
 
-            break
-        else:
-            break
-        '''
+            if up/total<0.8:
+                 bRet=False
+
+            if show:
+                plt.clf()
+        #'''
         break
 
     return bRet
@@ -680,24 +696,25 @@ def draw_kline(stock,kdata,  buy_time, sell_time,
         reward=0
 
     #只用图形显示收益差距很大的情况
-    if reward<disp_high or reward>disp_low:
-        return  reward
+    #if reward<disp_high and reward>disp_low:
+    #    return  reward
 
     plt.plot(list(range(count)),
              data, color='b', label='close')
 
-    # EMA 指数移动平均线  ma6跌破ma12连续若干周期
-    ma6 = talib.EMA(closing, timeperiod=6)
-    ma12 = talib.EMA(closing, timeperiod=12)
-    ma26 = talib.EMA(closing, timeperiod=26)
 
+    '''
+    # EMA 指数移动平均线  ma6跌破ma12连续若干周期
+    #ma6 = talib.EMA(closing, timeperiod=6)
+    #ma12 = talib.EMA(closing, timeperiod=12)
+    #ma26 = talib.EMA(closing, timeperiod=26)
     plt.plot(list(range(len(kdata))),
              ma6, color='r', label='ma6')
     plt.plot(list(range(len(kdata))),
              ma12, color='y', label='ma12')
-    plt.plot(list(range(len(kdata))),
-             ma26, color='g', label='ma26')
-
+    #plt.plot(list(range(len(kdata))),
+    #         ma26, color='g', label='ma26')
+    '''
 
     if buy_time == sell_time:
         # no sell time,sell on maxholding weeks
@@ -754,14 +771,13 @@ def draw_kline(stock,kdata,  buy_time, sell_time,
     buy_time = buy_time.strftime('%Y-%m-%d %H-%M-%S')
     sell_time = sell_time.strftime('%Y-%m-%d %H-%M-%S')
 
-
     if no_sell:
         title = '%s week=%d ' % (stock, week)
     else:
         title = '%s week=%d reward=%d%%\n %s--%s' % (stock, week, reward, buy_time, sell_time)
 
     plt.title(title)
-    plt.legend(loc='upper left', shadow=True, fontsize='x-large')
+    #plt.legend(loc='upper left', shadow=True, fontsize='x-large')
     return  reward
 
 def draw_cap_fig(cap_data,fig_id=312):
@@ -784,22 +800,29 @@ def draw_cap_fig(cap_data,fig_id=312):
 
     plt.legend(loc='upper left', shadow=True, fontsize='x-large')
 
-def draw_cap_main(cap_data,maList,
-    fig_id=313,draw_delta=False):
+#
+def draw_cap_main(cap_data,buy_point, sell_point,
+    maList,fig_id=313,draw_delta=False):
+
+    min_week_of_trend=60
     plt.subplot(fig_id)
     count = len(cap_data)
-
 
     if draw_delta==False:
         flow = (cap_data['HugeBuy'] - cap_data['HugeSell'] + cap_data['BigBuy'] - cap_data['BigSell']).values
         plt.ylabel('MAIN CAP')
         #累计主力总资金流
-        ma1 = [flow[0]]
+        total_flow = [flow[0]]
         for i in range(1,count):
-            ma1.append(ma1[i - 1] + flow[i])
+            total_flow.append(total_flow[i - 1] + flow[i])
 
         plt.plot(list(range(count)),
-                 ma1, color='brown')
+                 total_flow, color='brown')
+
+        cacl_cap_trend(total_flow,buy_point,
+                sell_point,min_week_of_trend+1,True)
+
+        #计算累计主力资金的趋势  曲线拟合：上升、下行两种状态
 
     else:
         plt.ylabel('MAIN DELTA')
@@ -809,12 +832,13 @@ def draw_cap_main(cap_data,maList,
         plt.plot(list(range(count)),
                  [0.0 for _ in range(count)],color='black')
 
-        for week in maList:
+        for week in maList[:1]:
             tmp=flow.rolling(week).mean().tolist()
             plt.plot(list(range(count)),
                      tmp, label=str(week))
 
-        plt.legend(loc='upper left', shadow=True, fontsize='x-large')
+
+        #plt.legend(loc='upper left', shadow=True, fontsize='x-large')
 
 '''
     在价格走势图显示买卖点信息
@@ -835,15 +859,11 @@ def draw_bs_on_kline(stock, kdata, buy_time, sell_time,
 
         # EMA 指数移动平均线  ma6跌破ma12连续若干周期
         ma6 = talib.EMA(closing, timeperiod=6)
-        ma12 = talib.EMA(closing, timeperiod=12)
-        ma26 = talib.EMA(closing, timeperiod=26)
+
 
         plt.plot(list(range(len(kdata))),
                  ma6, color='r', label='ma6')
-        plt.plot(list(range(len(kdata))),
-                 ma12, color='g', label='ma12')
-        plt.plot(list(range(len(kdata))),
-                 ma26, color='b', label='ma26')
+
 
         time_list = kdata['eob'].tolist()
 
@@ -925,13 +945,9 @@ def draw_rsi(kdata,fig_id=313,low=40,high=90,
     closing = kdata['close'].values
     # RSI
     RSI1 = talib.RSI(closing, timeperiod=5)
-    RSI2 = talib.RSI(closing, timeperiod=10)
 
     plt.plot(list(range(count)),
              RSI1, color='r', label='RSI1')
-    plt.plot(list(range(len(kdata))),
-             RSI2, color='b', label='RSI2')
-
 
     plt.plot(list(range(count)),
              [rsi_up for i in range(count)], color='black',label='U'+str(high))
@@ -955,29 +971,25 @@ def draw_vol(kdata,fig_id=515):
              vol, color='blue', label='vol')
     plt.plot(list(range(len(kdata))),
              ma6, color='red', label='ma6')
-    plt.plot(list(range(len(kdata))),
-             ma12, color='green', label='ma12')
 
-    plt.legend(loc='upper left', shadow=True, fontsize='x-large')
+    #plt.legend(loc='upper left', shadow=True, fontsize='x-large')
 
 def draw_stock_ta_fig(stock, ma,kdata,buy_time, sell_time,cap_data,
     week=30, bs=False,hold_week=60,log_dir='.',
-    rsi_low=20, rsi_up=80,disp_low=-6,disp_high=15):
+    rsi_low=20, rsi_up=80,disp_low=-6,disp_high=15,
+    buy_point=0,sell_point=0):
     # 以折线图表示结果 figsize=(20, 15)
     fig_count = 510  # 子图数量
-    reward=draw_kline(stock,kdata,  buy_time, sell_time, week,hold_week,fig_count+1,disp_low,disp_high)
-
-    if reward<disp_high or reward>disp_low:
-        return  reward
-
     fig = plt.figure(figsize=(18, 10))
     fig.subplots_adjust(hspace=0)
+
+    reward=draw_kline(stock,kdata,  buy_time, sell_time, week,hold_week,fig_count+1,disp_low,disp_high)
 
     #绘制主力资金图
     draw_cap_fig(cap_data,fig_count+2)
     #主力资金总趋势
-    draw_cap_main(cap_data,ma, fig_count + 3,False)
-    draw_cap_main(cap_data, ma, fig_count + 4, True)
+    draw_cap_main(cap_data,buy_point,sell_point,ma, fig_count + 3,False)
+    draw_cap_main(cap_data, buy_point,sell_point,ma, fig_count + 4, True)
     # 绘制RSI图
     #draw_rsi(kdata,fig_count+4,rsi_low, rsi_up)
 
@@ -989,16 +1001,16 @@ def draw_stock_ta_fig(stock, ma,kdata,buy_time, sell_time,cap_data,
     sell_time = sell_time.strftime('%Y-%m-%d %H-%M-%S')
 
     if reward>=0:
-        reward='u%03d'%reward
+        reward1='u%03d'%reward
     else:
-        reward = 'd%03d' % (-reward)
+        reward1 = 'd%03d' % (-reward)
 
     if bs == False:
         file = '%s/w%03d-%s-%s-%s-%s.png' % (
-            log_dir + '/fig', week,reward, stock, buy_time, sell_time)
+            log_dir + '/fig', week,reward1, stock, buy_time, sell_time)
     else:
         file = '%s/w%03d-%s-%s-%s-%s.png' % (
-            log_dir + '/bs_fig', week,reward, stock, buy_time, sell_time)
+            log_dir + '/bs_fig', week,reward1, stock, buy_time, sell_time)
     plt.savefig(file)
 
     #except:
@@ -1360,11 +1372,13 @@ def find_stop_trade_index(kdata,week):
 
 #todo 分析主力资金持续流入的市场表现：持续上升，先跌后升，平盘或下跌
 #todo 分析ticks数据对后续走势的影响,特别是大单进出的后续影响力
+#累计主力资金的走势与股价未来的走势影响极大，处于下行走势的股票下跌可能性很大
 def cacl_bs_by_cap(cap_path='data0322',
-    filters= ['CAP-','005.dat'],
+    filters= ['CAP-002','005.dat'],
     ma=[5, 10, 20],nBuyLastWeek=4, nSellLastWeek=6,
     rsi_low=20, rsi_up=80):
-    total=0
+
+    stotal=0
     sok=0
     snok=0
 
@@ -1395,6 +1409,7 @@ def cacl_bs_by_cap(cap_path='data0322',
         klen=len(kdata)
         ok=0
         nok=0
+        total=0
         if cap_len!=klen :
             if cap_len-klen>1:
                 #todo kdata's length does not equal with cap cap_data[840-1290] [CAP-000018-005.dat]
@@ -1407,8 +1422,8 @@ def cacl_bs_by_cap(cap_path='data0322',
                 continue
 
         nCount=sum(ma)+nBuyLastWeek+nSellLastWeek
-        look_back_week=nCount
-        i=nCount*2
+        look_back_week=nCount*3
+        i=nCount*6
         buy=False
         bs = False
         week_in_day=int(240/week)
@@ -1418,7 +1433,7 @@ def cacl_bs_by_cap(cap_path='data0322',
         while i<cap_len:
             start=i-look_back_week
             if not buy and \
-                (IsCAPMaUp(cap_data[i:i+nCount],ma,nBuyLastWeek))\
+                (main_cap_up(cap_data[:i],ma,nBuyLastWeek))\
                 and can_buy(kdata,start,i,nBuyLastWeek,rsi_low,rsi_up):# and
                 #print ('main flow ma up\n',cap_data[col][i+nCount-1:i+nCount])
                 buy_point=i
@@ -1426,25 +1441,160 @@ def cacl_bs_by_cap(cap_path='data0322',
 
             if buy and i-buy_point>week_in_day:
                 if stop_loss(kdata,start,buy_point,i) \
-                    or ((IsCAPMaDown(cap_data[i:i+nCount],ma,nSellLastWeek))
+                    or ((IsCAPMaDown(cap_data[:i],ma,nSellLastWeek))
                         and can_sell(kdata,start,buy_point,i,hold_week,nSellLastWeek,rsi_low,rsi_up)):#
-                    #print ('main flow ma down\n',cap_data[col][i+nCount-1:i+nCount])
-                    reward=draw_stock_ta_fig(stock,ma,
-                        kdata, #[max(0,buy_point-nCount-nCount):min(i+nCount+nCount,cap_len-1)], #max(0,buy_point-nCount-nCount):min(i+nCount+nCount,cap_len-1)
-                        int2_datetime(cap_data.iloc[buy_point, 0], cap_data.iloc[buy_point, 1]),
-                        int2_datetime(cap_data.iloc[i,0],cap_data.iloc[i,1]),
-                        cap_data,week=week, bs=bs,hold_week=hold_week,log_dir=log_dir,
-                        rsi_low=rsi_low, rsi_up=rsi_up)
+                    reward=kdata.loc[i,'close']/kdata.loc[buy_point,'close']
+                    if reward>1.06 or reward<0.95:
+                        draw_stock_ta_fig(stock,ma,
+                            kdata,
+                            int2_datetime(cap_data.iloc[buy_point, 0],
+                                          cap_data.iloc[buy_point, 1]),
+                            int2_datetime(cap_data.iloc[i,0],
+                                          cap_data.iloc[i,1]),
+                            cap_data,week=week, bs=bs,
+                            hold_week=hold_week,log_dir=log_dir,
+                            rsi_low=rsi_low, rsi_up=rsi_up,
+                            buy_point= buy_point,sell_point= i)
 
-                    if reward>5:
+                    if reward>1.02:
                         ok+=1
-                    elif reward<-5:
+                    else:
                         nok+=1
-                    total+=1
 
+                    total+=1
 
                     buy=False
 
             i=i+1
+        if total>0:
+            print('%s,%03d,good=%.0f%%,bad=%.0f%%' % (
+                stock,  week, 100*ok/total,100*nok/total))
 
-        print('%s,%03d,good=%02d,bad=%02d' % (stock,  week, ok,nok))
+        stotal+=total
+        sok+=ok
+        snok+=nok
+    if stotal>0:
+        print('total  %03d,good=%.0f%%,bad=%.0f%%' % (
+            week, 100 * sok / stotal, 100 * snok / stotal))
+
+
+'''
+    # 直线方程函数
+    def fx(x, pars):
+        return fnx(x, pars)
+
+    
+'''
+
+# 基本曲线拟合模型 线性（一次）、二次、三次、四次
+    # fnx=(a0*x+a1)*x+a2...
+def fnx(x, coefficients):
+    fn = coefficients[0] * x + coefficients[1]
+    for an in coefficients[2:]:
+        fn = fn * x + an
+
+    return fn
+
+def cacl_cap_trend(total_flow,buy_point,sell_point,week,show=False):
+    # 直线方程函数
+    def f1(x, A, B):
+        return fnx(x, [A, B])
+
+    # 二次曲线方程
+    def f2(x, A, B, C):
+        return fnx(x, [A, B, C])
+
+    # 三次曲线方程
+    def f3(x, A, B, C, D):
+        return fnx(x, [A, B, C, D])
+
+    # 4次曲线方程
+    def f4(x, A, B, C, D, E):
+        return fnx(x, [A, B, C, D, E])
+
+    # 4次曲线方程
+    def f4(x, A, B, C, D, E):
+        return fnx(x, [A, B, C, D, E])
+
+    # 5次曲线方程
+    def f5(x, A, B, C, D, E, F):
+        return fnx(x, [A, B, C, D, E, F])
+
+    # 5次曲线方程
+    def f6(x, A, B, C, D, E, F, G):
+        return fnx(x, [A, B, C, D, E, F, G])
+
+    def regression456(datas, show):
+        cap_len = len(datas)
+        x2 = range(cap_len)
+
+        A4, B4, C4, D4, E4 = optimize.curve_fit(f4, x2, datas)[0]
+
+        A5, B5, C5, D5, E5, F5 = optimize.curve_fit(f5, x2, datas)[0]
+
+        A2, B2, C2, D2, E2, F2, G2 = optimize.curve_fit(f6, x2, datas)[0]
+
+        x2 = x2[-week - 1:]
+        y4 = fnx(x2, [A4, B4, C4, D4, E4])
+        y5 = fnx(x2, [A5, B5, C5, D5, E5, F5])
+        y6 = fnx(x2, [A2, B2, C2, D2, E2, F2, G2])
+
+        ys = [y4, y5, y6]
+        trends = []
+        for i in range(1, week):
+            trend = []
+            for y in ys:
+                trend.append(y[i] >= y[i - 1])
+
+            trends.append(trend)
+
+        if show:
+            plt.plot(x2, y4, label='y4')
+            plt.plot(x2, y5, label='y5')
+            plt.plot(x2, y6, label='y6')
+            #plt.legend(loc='upper right', shadow=True, fontsize='x-large')
+            # 返回最近week趋势：全增，全减  趋势确定
+            #               增减，减增  趋势可能转变
+        return trends
+
+    def regression123(datas, show):
+        cap_len = len(datas)
+        x2 = range(cap_len)
+
+        A1, B1 = optimize.curve_fit(f1, x2, datas)[0]
+        A2, B2, C2 = optimize.curve_fit(f2, x2, datas)[0]
+        A3, B3, C3, D3 = optimize.curve_fit(f3, x2, datas)[0]
+
+
+
+        x2 = x2[-week - 1:]
+        y4 = fnx(x2, [A1, B1])
+        y5 = fnx(x2, [A2, B2, C2 ])
+        y6 = fnx(x2, [A3, B3, C3, D3])
+
+        ys = [y4, y5, y6]
+        trends = []
+        for i in range(1, week):
+            trend = []
+            for y in ys:
+                trend.append(y[i] >= y[i - 1])
+
+            trends.append(trend)
+
+        if show:
+            plt.plot(x2, y4, label='y4')
+            plt.plot(x2, y5, label='y5')
+            plt.plot(x2, y6, label='y6')
+            #plt.legend(loc='upper right', shadow=True, fontsize='x-large')
+            # 返回最近week趋势：全增，全减  趋势确定
+            #               增减，减增  趋势可能转变
+        return trends
+
+    if buy_point>0:
+        trends=regression123(total_flow[:buy_point],show)
+    if sell_point>0:
+        trends = regression123(total_flow[:sell_point], show)
+
+
+
+    return  trends
