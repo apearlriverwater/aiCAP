@@ -13,7 +13,7 @@ from scipy import optimize
 import datetime
 import time
 import talib
-
+import ui4backup    #ui interface
 # ------------  gm3 ---------------------
 try:
     from gm.api import *
@@ -291,18 +291,6 @@ def read_cap_flow(filepath):
     return caps
 
 
-'''
-    主力资金流统计
-'''
-
-
-def CaclMainFlow(CapFlow):
-    MainFlow = ()
-    for flow in CapFlow:
-        MainFlow = MainFlow + ((MainFlow + flow[4] + flow[5] - flow[8] - flow[9]) / 10000)
-        continue
-    return MainFlow  # 单位：万元  list
-
 
 '''
     均线多头向上判断：多头向上时返回true，否则false
@@ -356,8 +344,6 @@ def main_cap_up(data, maList, nLastWeeks):
             if up / total < 0.8:
                 bRet = False
 
-            if show:
-                plt.clf()
         # '''
         break
 
@@ -1002,13 +988,17 @@ def draw_vol(kdata, fig_id=515):
 def draw_stock_ta_fig(stock, ma, kdata, buy_time, sell_time, cap_data,
                       week=30, bs=False, hold_week=60, log_dir='.',
                       rsi_low=20, rsi_up=80, disp_low=-6, disp_high=15,
-                      buy_point=0, sell_point=0):
+                      buy_point=0, sell_point=0,fig_count = 510):
     # 以折线图表示结果 figsize=(20, 15)
-    fig_count = 510  # 子图数量
+    '''
+
     fig = plt.figure(figsize=(18, 10))
     fig.subplots_adjust(hspace=0)
+    '''
+      # 子图数量
 
-    reward = draw_kline(stock, kdata, buy_time, sell_time, week, hold_week, fig_count + 1, disp_low, disp_high)
+    reward = draw_kline(stock, kdata, buy_time, sell_time, week,
+                        hold_week, fig_count + 1, disp_low, disp_high)
 
     # 绘制主力资金图
     draw_cap_fig(cap_data, fig_count + 2)
@@ -1511,26 +1501,20 @@ def cacl_bs_by_cap(cap_path='data0322',
             week, 100 * sok / stotal, 100 * snok / stotal))
 
 
-'''
-    # 直线方程函数
-    def fx(x, pars):
-        return fnx(x, pars)
 
 
-'''
-
-
-# 基本曲线拟合模型 线性（一次）、二次、三次、四次
-# fnx=(a0*x+a1)*x+a2...
-def fnx(x, coefficients):
-    fn = coefficients[0] * x + coefficients[1]
-    for an in coefficients[2:]:
-        fn = fn * x + an
-
-    return fn
 
 
 def cacl_cap_trend(total_flow, buy_point, sell_point, week, show=False):
+    # 基本曲线拟合模型 线性（一次）、二次、三次、四次
+    # fnx=(a0*x+a1)*x+a2...
+    def fnx(x, coefficients):
+        fn = coefficients[0] * x + coefficients[1]
+        for an in coefficients[2:]:
+            fn = fn * x + an
+
+        return fn
+
     # 直线方程函数
     def f1(x, A, B):
         return fnx(x, [A, B])
@@ -1629,3 +1613,5 @@ def cacl_cap_trend(total_flow, buy_point, sell_point, week, show=False):
         trends = regression123(total_flow[:sell_point], show)
 
     return trends
+
+#todo 基于移动平均的局部主力资金流的变化情况分析、判断波段介入时机
