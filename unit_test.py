@@ -1,5 +1,6 @@
 import unittest
 import gmTools as tls
+import numpy as np
 import os
 import matplotlib.pyplot as plt
 from scipy import optimize
@@ -9,7 +10,12 @@ class Test_uint_test(unittest.TestCase):
         tls.cacl_bs_by_cap()
 
     '''
-        def test_cacl_cap_trend(self,cap_path='data0322'):
+    def test_cacl_cap(self, cap_path='data0322'):
+        tls.cacl_bs_by_cap()
+    def test_cacl_cap(self, cap_path='data0322'):
+        tls.cacl_bs_by_cap()
+    
+    def test_cacl_cap_trend(self,cap_path='data0322'):
 
         plt.figure()
 
@@ -44,6 +50,27 @@ class Test_uint_test(unittest.TestCase):
         bar_type	int	bar周期，以秒为单位，比如60即1分钟bar
         begin_time	string	开始时间, 如2015-10-30 09:30:00
         end_time	string	结束时间, 如2015-10-30 15:00:00
+    
+     def test_cacl_cap(self, cap_path='data0322'):
+        cap_path = 'data0322'
+        filters = ['CAP-002', '005.dat']
+
+        files = tls.get_filelist_from_path(cap_path, filters)
+
+        stock, week, cap_data, kdata = tls.read_stock_data(files[0])
+        count = len(cap_data)
+        files = files[1:]
+        x = np.arange(0, count, 1)
+        klen = len(kdata)
+
+        if klen == count:
+            flow = (cap_data['HugeBuy'] - cap_data['HugeSell'] + cap_data['BigBuy'] - cap_data['BigSell']).values
+            # 累计主力总资金流
+            total_flow = [flow[0]]
+            for i in range(1, count):
+                total_flow.append(total_flow[i - 1] + flow[i])
+
+        tls.draw_kline(stock, kdata, 0, 0, week, 100, 311, total_flow)
     
     def test_read_kline(self):
         symbol_list	='SHSE.600000'
