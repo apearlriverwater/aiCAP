@@ -30,6 +30,13 @@ import datetime
 import time
 import talib
 import ui4backup    #ui interface
+
+def write_log_msg():
+    import traceback
+    f = open("errorlog.txt", "w")
+    f.write(traceback.format_exc())
+    print(traceback.format_exc())
+
 # ------------  gm3 ---------------------
 try:
     from gm.api import *
@@ -38,6 +45,7 @@ try:
     set_token('c631be98d34115bd763033a89b4b632cef5e3bb1')
 except:
     print('gm3 init error!!!!')
+    write_log_msg()
 
 
 #------------global varies
@@ -312,6 +320,7 @@ def read_cap_flow(filepath):
                     # 出现数据重复,保留最新的数据
                     pass
     except:
+        write_log_msg()
         pass
     caps = pd.DataFrame(series, columns=columns)
     return caps
@@ -450,6 +459,75 @@ def read_ticks(tickfilepath):
     ticks = pd.DataFrame(series, columns=columns)
     return ticks
 
+#todo 待测试研究ticks与5分钟数据的对应关系
+'''
+超大单：大于等于50万股或者100万元的成交单；
+大单：大于等于10万股或者20万元且小于50万股和100万元的成交单；
+中单：大于等于2万股或者4万元且小于10万股和20万元的成交单；
+小单：小于2万股和4万元的成交单；
+'''
+def cacl_ticks_cap(tickspath='\data\ticks-000001-20180329.dat',cappath='\data\cap-000001-005.dat'):
+    ticks=read_ticks(tickspath)
+    capdata=read_cap_flow(cappath)
+    tick_time=ticks.loc[0,'Time']
+    ticks_date=datetime.datetime.strptime('2018-03-29 09:35:00', '%Y-%m-%d %H:%M:%S')
+    i=len(capdata)-48*5
+    while capdata.loc[i,'Date']!=ticks_date:
+        i+=48
+        if i>len(capdata):
+            break
+
+    if i < len(capdata):
+        # data found
+
+
+        '''
+        columns = ['Time', 'Index', 'PriceMul1000', 'Vol', 'BS']
+        超大单：大于等于50万股或者100万元的成交单；
+        大单：大于等于10万股或者20万元且小于50万股和100万元的成交单；
+        中单：大于等于2万股或者4万元且小于10万股和20万元的成交单；
+        小单：小于2万股和4万元的成交单；
+        '''
+        tick_time=0
+        for i in range(len(ticks)):
+            if ticks.loc[i,'Time']-tick_time<5*60:
+                tick_time=ticks.loc[i,'Time']
+                #5分钟内的总成交量
+                if ticks.loc[i,'Vol']>=500000\
+                   or ticks.loc[i,'Vol']*ticks.loc[i,'PriceMul1000']/1000>=1e6:
+                    if ticks.loc[i,'BS']==1:
+                        huge_sell += ticks.loc[i, 'Vol']
+                    else:
+                        huge_buy+=ticks.loc[i,'Vol']
+                elif ticks.loc[i,'Vol']>=100000\
+                   or ticks.loc[i,'Vol']*ticks.loc[i,'PriceMul1000']/1000>=2e5:
+                    if ticks.loc[i,'BS']==1:
+                        big_sell += ticks.loc[i, 'Vol']
+                    else:
+                        big_buy+=ticks.loc[i,'Vol']
+                elif ticks.loc[i,'Vol']>=20000\
+                   or ticks.loc[i,'Vol']*ticks.loc[i,'PriceMul1000']/1000>=4e4:
+                    if ticks.loc[i,'BS']==1:
+                        mid_sell += ticks.loc[i, 'Vol']
+                    else:
+                        mid_buy+=ticks.loc[i,'Vol']
+                else:
+                    if ticks.loc[i,'BS']==1:
+                        small_sell += ticks.loc[i, 'Vol']
+                    else:
+                        small_buy+=ticks.loc[i,'Vol']
+            else:
+                huge_buy = 0
+                huge_sell = 0
+                big_buy = 0
+                big_sell = 0
+                mid_buy = 0
+                mid_sell = 0
+                samll_buy = 0
+                small_sell = 0
+
+    pass
+
 
 def get_backtest_start_date(start_date, look_back_dates):
     # 获取开始读取数据的开始位置  从训练结束时间倒退一年内的从交易日数据
@@ -459,6 +537,7 @@ def get_backtest_start_date(start_date, look_back_dates):
         trade_dates = get_trading_dates('SHSE', start_day, stop_day)
         return trade_dates[-look_back_dates]
     except:
+        write_log_msg()
         pass
 
 
@@ -476,6 +555,7 @@ def get_index_stock(index_symbol, return_list=True):
             css.sort()
             return css
         except:
+            write_log_msg()
             pass
 
 
@@ -530,6 +610,7 @@ def get_stock_by_market(exchange, sec_type, is_active, return_list=True):
                     stock_list += "," + cs.symbol
             return stock_list[1:]
         except:
+            write_log_msg()
             pass
 
 
@@ -546,6 +627,7 @@ def get_minutes_bars(stock_list, minutes, begin_time, end_time):
             bars = md.get_bars(stock_list, int(minutes * 60), begin_time, end_time)
             return bars
         except:
+            write_log_msg()
             pass
 
 
@@ -610,6 +692,7 @@ def read_kline(symbol_list, weeks_in_seconds,
 
                 start_time = bars.iloc[count - 1, 0]
             except:
+                write_log_msg()
                 break
         return kdata
 
@@ -816,6 +899,7 @@ def draw_bs_on_kline(stock, kdata, buy_time, sell_time,
 
         plt.title(title)
     except:
+        write_log_msg()
         pass
 
     plt.legend(loc='upper left', shadow=True, fontsize='x-large')
@@ -888,15 +972,23 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
         ax.set_ylabel('RSI')
         closing = kdata['close'].values
         # RSI
-        RSI1 = talib.RSI(closing, timeperiod=5)
+        RSI5 = talib.RSI(closing, timeperiod=5)
+        RSI10 = talib.RSI(closing, timeperiod=10)
+        RSI26 = talib.RSI(closing, timeperiod=26)
 
         ax.plot(list(range(count)),
-                 RSI1, color='gray', label='RSI1')
+                 RSI5, color='gray', label='RSI5')
 
         ax.plot(list(range(count)),
-                 [rsi_up for i in range(count)], color='red', label='U' + str(high))
+                RSI10, color='blue', label='RSI10')
+
         ax.plot(list(range(count)),
-                 [rsi_low for i in range(count)], color='green', label='D' + str(low))
+                RSI26, color='red', label='RSI26')
+
+        ax.plot(list(range(count)),
+                 [rsi_up for i in range(count)], color='red')
+        ax.plot(list(range(count)),
+                 [rsi_low for i in range(count)], color='green')
 
         ax.legend(loc='upper left', shadow=True, fontsize='x-large')
 
@@ -969,6 +1061,7 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
             buy_price = data[buy_point]
             sell_price = data[sell_point]
         except:
+            write_log_msg()
             reward = 0
 
         # 只用图形显示收益差距很大的情况
@@ -1149,6 +1242,7 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
                     change_list.append([index, 'ro'])
                     #plt.plot(x[index], vol[index], 'ro')
         except:
+            write_log_msg()
             pass
         return  change_list
 
@@ -1204,6 +1298,7 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
                             if k_low>0.7:
                                 washing_index.append([i,'bo'])
             except:
+                write_log_msg()
                 pass
         return  washing_index
 
@@ -1514,6 +1609,7 @@ def feed_dict(train):
         xs = train_x[g_current_train_stop]
         ys = train_y[g_current_train_stop]
     except:
+        write_log_msg()
         print('error in feed_dict %d' % (g_current_train_stop))
 
     # todo  数据取完后如何处理？  直接退出运行,需支持对未来收益的预测
@@ -1617,7 +1713,7 @@ def find_stop_trade_index(kdata, week):
 # todo 分析ticks数据对后续走势的影响,特别是大单进出的后续影响力
 # 累计主力资金的走势与股价未来的走势影响极大，处于下行走势的股票下跌可能性很大
 def cacl_bs_by_cap(cap_path='\data',
-                   filters=['CAP-', '005.dat'],
+                   filters=['CAP-', '015.dat'],
                    ma=[5, 10, 20], nBuyLastWeek=4, nSellLastWeek=6,
                    rsi_low=20, rsi_up=80):
     stotal = 0
@@ -1643,6 +1739,7 @@ def cacl_bs_by_cap(cap_path='\data',
             start_dt = int2_datetime(cap_data.iloc[0, 0], cap_data.iloc[0, 1])
             stop_dt = int2_datetime(cap_data.iloc[cap_len - 1, 0], cap_data.iloc[cap_len - 1, 1])
         except:
+            write_log_msg()
             continue
 
         if week == 0:
@@ -1654,7 +1751,7 @@ def cacl_bs_by_cap(cap_path='\data',
         nok = 0
         total = 0
         if cap_len != klen:
-            stop=min(cap_len,klen)-4
+            stop=min(cap_len,klen)-2
             stop_dt=int2_datetime(cap_data.loc[stop,'Date'],cap_data.loc[stop,'Time'])
             if stop_dt!=kdata.loc[stop,'eob']:
                 # todo kdata's length does not equal with cap cap_data[840-1290] [CAP-000018-005.dat]
@@ -1879,6 +1976,7 @@ def read_stock_data( file_path):
 
         return  stock,week,cap_data,kdata
     except:
+        write_log_msg()
         print('error in read_stock_data')
         pass
 

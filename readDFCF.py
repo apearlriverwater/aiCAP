@@ -17,9 +17,68 @@ import pyautogui
 import subprocess
 import win32gui, win32api, win32con  #module name pywin32
 import win32clipboard as clipboard
-import time
+import time,re
 
 file = "E:\\02soft\\99eastmoney\\swc8\\mainfree.exe"
+
+def write_log_msg():
+    import traceback
+    f = open("errorlog.txt", "a")
+    f.write(traceback.format_exc())
+    print(traceback.format_exc())
+
+
+class cWindow:
+    def __init__(self):
+        self._hwnd = None
+
+    def SetAsForegroundWindow(self):
+        # First, make sure all (other) always-on-top windows are hidden.
+        self.hide_always_on_top_windows()
+        win32gui.SetForegroundWindow(self._hwnd)
+
+    def Maximize(self):
+        win32gui.ShowWindow(self._hwnd, win32con.SW_MAXIMIZE)
+
+    def _window_enum_callback(self, hwnd, regex):
+        '''Pass to win32gui.EnumWindows() to check all open windows'''
+        if self._hwnd is None and re.match(regex, str(win32gui.GetWindowText(hwnd))) is not None:
+            self._hwnd = hwnd
+
+    def find_window_regex(self, regex):
+        self._hwnd = None
+        win32gui.EnumWindows(self._window_enum_callback, regex)
+
+    def hide_always_on_top_windows(self):
+        win32gui.EnumWindows(self._window_enum_callback_hide, None)
+
+    def _window_enum_callback_hide(self, hwnd, unused):
+        if hwnd != self._hwnd:  # ignore self
+            # Is the window visible and marked as an always-on-top (topmost) window?
+            if win32gui.IsWindowVisible(hwnd) and win32gui.GetWindowLong(hwnd,
+                                    win32con.GWL_EXSTYLE) & win32con.WS_EX_TOPMOST:
+                # Ignore windows of class 'Button' (the Start button overlay) and
+                # 'Shell_TrayWnd' (the Task Bar).
+                className = win32gui.GetClassName(hwnd)
+                if not (className == 'Button' or className == 'Shell_TrayWnd'):
+                    # Force-minimize the window.
+                    # Fortunately, this seems to work even with windows that
+                    # have no Minimize button.
+                    # Note that if we tried to hide the window with SW_HIDE,
+                    # it would disappear from the Task Bar as well.
+                    win32gui.ShowWindow(hwnd, win32con.SW_FORCEMINIMIZE)
+
+def show_dfcf():
+    time.sleep(2)
+    try:
+        regex ='东方财富终端'
+        cW = cWindow()
+        cW.find_window_regex(regex)
+        cW.Maximize()
+        cW.SetAsForegroundWindow()
+    except:
+        write_log_msg()
+
 
 def click_fig(fig_path,off_x=0,off_y=0):
     ret=True
@@ -28,6 +87,7 @@ def click_fig(fig_path,off_x=0,off_y=0):
         if x>0 and y>0:
             pyautogui.click(x+off_x, y+off_y)
     except:
+        write_log_msg()
         ret=False
 
     return  ret
@@ -38,9 +98,11 @@ def  close_window(caption):
     try:
         hwnd_dfcf = win32gui.FindWindow(None, caption)
         if hwnd_dfcf>0:
+            time.sleep(1)
             win32api.SendMessage(hwnd_dfcf, win32con.WM_CLOSE, 0, 0)  # CLOSE WINDOWS
             ret = True
     except:
+        write_log_msg()
         pass
 
     return  ret
@@ -57,7 +119,7 @@ def openDFCF(file=file):
 
     #等待欢迎提示窗体，出现后关闭它，最长等待35秒
     # 找不到应用自行弹出的窗口，无法点击它
-    waiting=35
+    waiting=60
     while waiting>0:
         time.sleep(2)
         if close_welcome():
@@ -65,11 +127,19 @@ def openDFCF(file=file):
 
         waiting-=3
 
+    time.sleep(3)
+    win32gui.ShowWindow(hwnd_dfcf, win32con.SW_MAXIMIZE)
+    '''
     screenWidth, screenHeight = pyautogui.size()
     currentMouseX, currentMouseY = pyautogui.position()
     num_seconds = 1.2
     #  用num_seconds秒的时间把光标移动到(x, y)位置
     pyautogui.moveTo(screenWidth/2, screenHeight/2, duration=num_seconds)
+    '''
+
+    key_list=[['6',1],['0',1],['enter',1]]
+    press_keys(key_list)
+    time.sleep(3)
 
 # 定义两个方法，来读写剪贴板，注意要和目标系统的编码方式相同
 def get_text_from_clipboard():
@@ -87,9 +157,19 @@ def set_text_2_clipboard(aString=''):
     clipboard.SetClipboardData(win32con.CF_TEXT, aString.encode(encoding='gbk'))
     clipboard.CloseClipboard()
 
+# 按键序列处理
+def press_keys(key_list):
+    # 按键序列处理
+    for key in key_list:
+        for _ in range(key[1]):
+            pyautogui.keyDown(key[0])
+            time.sleep(0.2)
+            pyautogui.keyUp(key[0])
+            time.sleep(0.3)
+
 #模拟人工操作的方式导出东方财富数据
 def export_dfcf_data(click_points,key_list):
-
+    show_dfcf()
     ret=''
     #try:
     #click_fig("dfcfMenu\\cap_flow.png")
@@ -114,13 +194,17 @@ def export_dfcf_data(click_points,key_list):
         ret=get_text_from_clipboard()
 
     #except:
+    #    write_log_msg()
     #    ret=None
     return  ret
 
 #模拟人工操作的方式导出all实时资金流
 def export_allstock_real_capflow():
+    show_dfcf()
     click_points=[
         [976,44],
+        [976, 44],
+        [976, 44],
         [273, 307]
     ]
     key_list = [
@@ -137,6 +221,7 @@ def export_allstock_real_capflow():
 
 #模拟人工操作的方式导出all实时资金流
 def export_mystock2_real_capflow():
+    show_dfcf()
     click_points=[
         [175,40],
         [178,692],  #178,692  second self stocks  119, 689
@@ -156,9 +241,12 @@ def export_mystock2_real_capflow():
     return  export_dfcf_data(click_points,key_list)
 
 def export_mystock_real_capflow():
+    show_dfcf()
     click_points=[
         [175,40],
+        [175, 40],
         [119, 689],  #178,692  second self stocks
+        [119, 689],  # 178,692  second self stocks
         [270, 62],
         [204, 312]
     ]
@@ -175,6 +263,7 @@ def export_mystock_real_capflow():
     return  export_dfcf_data(click_points,key_list)
 
 def export_mystock2_real_status():
+    show_dfcf()
     click_points=[
         [175,40],
         [178,692],
@@ -194,6 +283,7 @@ def export_mystock2_real_status():
     return  export_dfcf_data(click_points,key_list)
 
 def export_mystock_real_status():
+    show_dfcf()
     click_points=[
         [175,40],
         [119, 689],
@@ -213,6 +303,7 @@ def export_mystock_real_status():
     return  export_dfcf_data(click_points,key_list)
 
 def export_allstock_real_status():
+    show_dfcf()
     click_points=[
         [256,42],    #沪深排行
         [38, 128],  #沪深个股
@@ -290,6 +381,7 @@ def get_item_from_line(line,value_index=[],non_value_index=[]):
 
                 line=line[next_tab+1:]
     except:
+        #write_log_msg()
         pass
 
     return  data
@@ -329,7 +421,7 @@ def format_dfcf_export_text(export_text,values='',non_values=''):
     return  data_list
 
 def read_real_capflow():
-    real_status = export_mystock_real_capflow()  # export_real_capflow()
+    real_status =export_allstock_real_capflow() # export_mystock_real_capflow()  # export_allstock_real_capflow():
     values = [u'序', u'最新', u'涨幅%', u'集合竞价', u'主力净流入',
               u'超大单净占比%', u'大单净占比%']
 
