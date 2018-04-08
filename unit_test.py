@@ -1,13 +1,55 @@
 import unittest
 import gmTools as tls
 import numpy as np
+import pandas as pd
 import os
 import matplotlib.pyplot as plt
 from scipy import optimize
 
 class Test_uint_test(unittest.TestCase):
-    def test_cacl_cap(self, cap_path='data0322'):
-        tls.cacl_bs_by_cap()
+    '''
+    多头选股：条件与：15日内创30日新低，10日内连续缩量，
+                条件或：5日内温和上涨，10日内间歇放量，5日内突然放量
+                东方财富条件选股不好用，改用掘金量化终端自行选择
+    '''
+    def test_stock_long(self, block='SHSE.000300',week_in_seconds=4 * 60 * 60,count=30):
+
+        stock_list = tls.get_block_stock_list(block)
+        stock_long=[]
+        for stock in stock_list:
+            bars = tls.read_last_n_kline(stock, week_in_seconds,count)
+
+            #条件与：15日内创30日新低，10日内连续缩量
+            closing=bars['close']
+
+            # 15日内创30日新低
+            vol_count = 15
+            if closing.idxmin()!=closing[-vol_count:].idxmin():
+                continue
+
+            vols = bars['volume'][-vol_count * 2:]
+
+            #15日内连续缩量  vol小于5日均值的数量占60%以上
+            vol_ma=vols.rolling(window=5,center=False).mean()
+            tmp=(vols[-vol_count:]<vol_ma[-vol_count:]).tolist().count(True)
+            if tmp/vol_count<0.5:
+                continue
+
+            #条件或：10日内间歇放量
+            vol_count = 10
+            tmp = (vols[-vol_count:] >2* vol_ma[-vol_count:]).tolist().count(True)
+            tmp1=False
+            tmp2=False
+            if tmp<2:
+                # 条件或：5日内温和上涨，5日内突然放量
+                tmp1 = (vols[-vol_count:] >  vol_ma[-vol_count:]).tolist().count(True)>4    #大于5日均线
+                tmp2 = (vols[-vol_count:] > 2* vol_ma[-vol_count:]).tolist().count(True)>2 #大于5日均线2倍
+
+            if tmp>=2 or tmp1 or tmp2:
+                #满足可介入条件
+                stock_long.append(stock)
+
+        return stock_long
 
     '''
     def test_cacl_cap(self, cap_path='data0322'):

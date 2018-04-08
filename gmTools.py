@@ -547,7 +547,7 @@ def get_backtest_start_date(start_date, look_back_dates):
 '''
 
 
-def get_index_stock(index_symbol, return_list=True):
+def get_index_stock(index_symbol):
     # 连接本地终端时，td_addr为localhost:8001,
     if (True):
         try:
@@ -628,16 +628,6 @@ def get_minutes_bars(stock_list, minutes, begin_time, end_time):
             return bars
         except:
             write_log_msg()
-            pass
-
-
-def get_daily_bars(stock_list, begin_time, end_time):
-    # 连接本地终端时，td_addr为localhost:8001,
-    if (td.init('haigezyj@qq.com', 'zyj2590@1109', 'strategy_1') == 0):
-        try:
-            bars = md.get_dailybars(stock_list, begin_time, end_time)
-            return bars
-        except:
             pass
 
 
@@ -746,56 +736,17 @@ def read_kline_ts(symbol_list, weeks_in_seconds, begin_time, end_time, max_recor
         return pd.DataFrame(kdata, columns=columns)
 
 
-def read_last_n_kline(symbol_list, weeks_in_seconds, count, end_time):
+def read_last_n_kline(stock, weeks_in_seconds, count, end_time=None):
     # 连接本地终端时，td_addr为localhost:8001,
-    if (td.init('haigezyj@qq.com', 'zyj2590@1109', 'strategy_1') == 0):
-        # 类结构体转成dataframe
-        columns = ['eob', 'open', 'high', 'low', 'close', 'volume', 'amount']
-        bars = 0
-
+    if True:
         is_daily = (weeks_in_seconds == 240 * 60)
-        data_list = []  # pd.DataFrame(None, columns=columns)
-        '''
-        todo 整批股票读取有问题，数据取不全，放弃
-        stocks = ''
-        for x in symbol_list:
-            stocks+=','+x
+        # 返回结果是bar类数组
+        if is_daily:
+            bars = history_n(stock,'1d', count, end_time,skip_suspended=True, df=True)
+        else:
+            bars = history_n(stock,'%ds'% weeks_in_seconds, count, end_time,skip_suspended=True,df=True)
 
-        read_days=int(count*weeks_in_seconds/240/60)+1
-        start_date=md.get_calendar('SZSE',
-            datetime.datetime.strptime(end_time, '%Y-%m-%d %H:%M:%S')
-                -datetime.timedelta(days=read_days),end_time)[0].strtime
-        start_date=start_date[:10] +' 09:30:00'
-
-        while start_date<end_time:
-            bars=md.get_bars(stocks[1:], weeks_in_seconds, start_date, end_time)
-        '''
-        for stock in symbol_list:
-            # now = '[{0}] read k line'.format(time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(time.time())))
-            # print(now,stock)
-            kdata = []
-            # 返回结果是bar类数组
-            if is_daily:
-                bars = md.get_last_n_dailybars(stock, count, end_time)
-            else:
-                bars = md.get_last_n_bars(stock, weeks_in_seconds, count, end_time)
-
-            for bar in bars:
-                if is_daily:
-                    kdata.append([int(bar.utc_time),
-                                  bar.open, bar.high, bar.low, bar.close,
-                                  bar.volume, bar.amount])
-                else:
-                    kdata.append([int(bar.utc_endtime),
-                                  bar.open, bar.high, bar.low, bar.close,
-                                  bar.volume, bar.amount])
-
-            if len(bars) > 0:
-                kdata = pd.DataFrame(kdata, columns=columns)
-                kdata = kdata.sort_values(by='eob', ascending=False)
-                data_list.append({'code': stock, 'kdata': kdata})
-
-        return data_list
+        return bars
 
 
 def draw_cap_fig(cap_data, fig_id=312):
