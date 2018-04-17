@@ -29,7 +29,7 @@ from scipy import optimize
 import datetime
 import time
 import talib
-import ui4backup    #ui interface
+#import ui4backup    #ui interface
 
 def write_log_msg():
     import traceback
@@ -264,8 +264,6 @@ path:
 filename:文件名包含的子字符串，不支持通配符
 onlyfile=True  是否仅返回文件名，不返回子目录名
 '''
-
-
 def get_code_in_cap_file(path, filename, minutes, onlyfile=True):
     lists = os.listdir(path)
     files = []
@@ -324,6 +322,83 @@ def read_cap_flow(filepath):
         pass
     caps = pd.DataFrame(series, columns=columns)
     return caps
+
+'''
+# 读取dfcf自选股信息
+文件格式：首行空行，每个股票一行，首数字代表市场：0/3深圳、6上海，6位股票代码
+002320
+002341
+603608
+'''
+def read_dfcf_selfstock_file(filename):
+    f = open(filename, 'r')
+    tmp = f.read()
+    f.close()
+
+    stock_list = []
+    while len(tmp) > 0:
+        try:
+            if '\n' not in tmp:
+                i = len(tmp)
+            else:
+                i = tmp.index('\n')
+
+            if i > 0:
+                stock = tmp[:i]
+                if stock not in stock_list:
+                    if stock[0] != '6':
+                        market = 'SZSE.'
+                    else:
+                        market = 'SHSE.'
+
+                    stock_list.append(market + stock)
+
+            tmp = tmp[i + 1:]
+        except:
+            break
+
+    return stock_list
+
+'''
+# 读取平安证券导出自选股信息
+文件格式：首行空行，每个股票一行，首数字代表市场：0深圳、1上海，后6位股票代码
+0002320
+0002341
+1603608
+1603808
+'''
+def read_pazq_selfstock_path(data_path='pazq'):
+    files = get_filelist_from_path(data_path, '.EBK')
+
+    stock_list=[]
+    for file_path in files:
+        f = open(file_path, 'r')
+        tmp = f.read()
+        f.close()
+        while len(tmp)>0:
+            try:
+                if '\n' not in tmp:
+                    i=len(tmp)
+                else:
+                    i=tmp.index('\n')
+
+                if i>0:
+                    stock=tmp[:i]
+                    if stock not in stock_list:
+                        if stock[0]=='0':
+                            market='SZSE.'
+                        else:
+                            market = 'SHSE.'
+
+                        stock_list.append(market+stock[1:])
+                else:
+                    stock=''
+
+                tmp = tmp[i + 1:]
+            except:
+                break
+
+    return stock_list
 
 
 
@@ -619,18 +694,6 @@ def get_stock_by_market(exchange, sec_type, is_active, return_list=True):
     stock_list :"SHSE.600000,SZSE.000001"
 '''
 
-
-def get_minutes_bars(stock_list, minutes, begin_time, end_time):
-    # 连接本地终端时，td_addr为localhost:8001,
-    if (td.init('haigezyj@qq.com', 'zyj2590@1109', 'strategy_1') == 0):
-        try:
-            bars = md.get_bars(stock_list, int(minutes * 60), begin_time, end_time)
-            return bars
-        except:
-            write_log_msg()
-            pass
-
-
 '''
 利用掘金终端的函数读取需要的K线数据
 get_bars 提取指定时间段的历史Bar数据，支持单个代码提取或多个代码组合提取。策略类和行情服务类都提供该接口。
@@ -642,8 +705,6 @@ get_bars(symbol_list, bar_type, begin_time, end_time)
         end_time	string	结束时间, 如2015-10-30 15:00:00
 return:dataframe  'eob','open','high','low','close','volume','amount'
 '''
-
-
 def read_kline(symbol_list, weeks_in_seconds,
                begin_time, end_time, max_record=50000):
     if (True):
@@ -735,6 +796,14 @@ def read_kline_ts(symbol_list, weeks_in_seconds, begin_time, end_time, max_recor
                              + ' ' + bars[count - 1].strendtime[11:19]
         return pd.DataFrame(kdata, columns=columns)
 
+def get_next_trade_date(date='2017-05-01'):
+    return     get_next_trading_date(exchange='SZSE', date=date)
+
+#获取最近1分钟的交易日期、时间
+def get_last_trade_datetime():
+    last_trade_date = history_n('SHSE.000001', '60s', 1,
+            None, skip_suspended=True, df=True).loc[0, 'eob']
+    return last_trade_date
 
 def read_last_n_kline(stock, weeks_in_seconds, count, end_time=None):
     # 连接本地终端时，td_addr为localhost:8001,
@@ -743,10 +812,14 @@ def read_last_n_kline(stock, weeks_in_seconds, count, end_time=None):
         # 返回结果是bar类数组
         if is_daily:
             bars = history_n(stock,'1d', count, end_time,skip_suspended=True, df=True)
+            last_trade_date = history_n('SHSE.000001','1d', 1, end_time,skip_suspended=True, df=True).loc[0,'eob']
         else:
             bars = history_n(stock,'%ds'% weeks_in_seconds, count, end_time,skip_suspended=True,df=True)
+            last_trade_date = history_n('SHSE.000001', '%ds'% weeks_in_seconds, 1, end_time, skip_suspended=True, df=True).loc[0, 'eob']
 
-        return bars
+        #丢弃停牌的股票
+        if len(bars)>0 and bars.loc[len(bars)-1,'eob']==last_trade_date:
+            return bars
 
 
 def draw_cap_fig(cap_data, fig_id=312):
@@ -768,7 +841,6 @@ def draw_cap_fig(cap_data, fig_id=312):
         color += 1
 
     plt.legend(loc='upper left', shadow=True, fontsize='x-large')
-
 
 
 
@@ -1615,6 +1687,19 @@ def show_BS(plt, point, price, is_buy=True, title=''):
 def get_block_stock_list(stock_block):
     return get_index_stock(stock_block)
 
+#从板块组合找出股票列表，进行重复股票代码检测
+def get_stocks_form_blocks(blocks):
+    stock_list=[]
+    for block in blocks:
+        stocks=get_block_stock_list(block)
+        if len(stock_list)==0:
+            stock_list=stocks
+        else:
+            for stock in stocks:
+                if not stock in stock_list:
+                    stock_list.append(stock)
+
+    return  stock_list
 
 # 20151206 110507 -->'2015-12-06 11:05:07'
 def int2_datetime_str(date_int, time_int):

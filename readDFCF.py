@@ -4,19 +4,29 @@
   1、操作dfcf界面的控制程序，自动控制软件启动、登录、功能项选择等
   2、在交易日定期利用数据导出功能把数据导出到剪辑板或者文件再进行处理
   2.1 导出大盘指数情况
+    未实现。
+    可利用掘金的数据订阅功能实现数据收集。
 
   2.2 全市场涨跌情况
-      通过资金流获得，方便统计涨跌情况、资金流入情况
+      通过资金流获得，方便统计涨跌情况、资金流入情况。
+      未实现。
 
   2.3 自选股涨跌与资金流情况
-      含平安推荐股票涨跌情况
+      含平安推荐股票涨跌情况。
+      已实现一致预期等自定义标的的直接导入分析。
 
   2.4 基于导出数据的价值挖掘  初步条件选股或盘中选股，交易期间动态优化
-    多头选股：条件与：15日内创30日新低，10日内连续缩量，
+    一买选股（底部起涨，参数待进一步优化）
+            条件与：15日内创30日新低，10日内连续缩量，
             条件或：5日内温和上涨，10日内间歇放量，5日内突然放量
             东方财富条件选股不好用，改用掘金量化终端自行选择
+    二买选股（阶段突破）：
+        1）搓揉线后的突破
+        2）主力增仓突破  盘中实时导出数据，已能体现主力的趋势：1、5、10日增仓数据很有价值，
+           每15分钟判断一次自选标的、每小时分析一次全市场前500个标的主力资金进出情况
 
-      阶段统计：可组合定义各种参数
+   2.5 待挖掘使用的数据
+      阶段统计：可组合定义各种参数，包括重要的基础参数：市盈率、股本、流通盘、换手率等
           自定义1至5日、10日、20日、30日成交量（换手率）、成交金额、振幅、复权后的均价，
                 自行计算波动率：寻找突破者
 
@@ -37,35 +47,72 @@
 
 '''
 import pyautogui
+
 import subprocess
 import win32gui, win32api, win32con  #module name pywin32
 import win32clipboard as clipboard
-import time,re
+import datetime,time,re
 import pandas as pd
+import os
 import numpy as np
 import gmTools
+import infWECHAT as wechat
 
-STOCK_BLOCK = 'SHSE.000300'
+'''
+-----------掘金主要指数--------------------------------
+SHSE.000001 	上证指数  SHSE.000009 	上证380
+SHSE.000010 	上证180  SHSE.000016 	上证50
+SHSE.000029 	180价值  SHSE.000042 	上证央企
+SHSE.000044 	上证中盘  SHSE.000045 	上证小盘
+SHSE.000043 	超大盘    SHSE.000069 	消费80
+SHSE.000097 	高端装备  SHSE.000108 	380消费
 
-file = "E:\\02soft\\99eastmoney\\swc8\\mainfree.exe"
+SHSE.000300 	沪深300  SHSE.000838 	创业价值
+SHSE.000905 	中证500  SHSE.000906 	中证800
+SHSE.000932 	中证消费  SHSE.000933 	中证医药
+SHSE.000934 	中证金融  SHSE.000960 	中证龙头
+SHSE.000964 	中证新兴
+
+SZSE.399001 	深证成指  SZSE.399002 	深成指R
+SZSE.399005 	中小板指  SZSE.399006 	创业板指
+
+SZSE.399008 	中小300  SZSE.399012 	创业300
+SZSE.399013 	深市精选  SZSE.399673 	创业板50
+-----------掘金主要指数--------------------------------
+'''
+
+STOCK_BLOCK = 'SHSE.000906'
+
+#重点关注的板块
+FAVORTE_BLOCKS=['SHSE.000009','SHSE.000016','SHSE.000097','SHSE.000300',
+                'SHSE.000838','SZSE.399008','SZSE.399012','SZSE.399013','SZSE.399673']
+
+dfcf_main_file = "E:\\02soft\\99eastmoney\\swc8\\mainfree.exe"
 dfcf_menu_points=[
     ['首页',28,44],
     ['全景图',108,44],
+    ['自选股',188,44],
     ['工具',510,16],
-    [' 设置自选股',201,44],
+    ['设置自选股',201,44],
     ['沪深排行',266,44],
     ['板块检测',332,44],
     ['沪深指数',394,44]
 ]
 
 #设置自选股主要操作
-setup_my_stock=[
+setup_my_stock_ui_item=[
     ['addstock',712,474],
-    ['long',464,322],
-    ['hot',458,343],
+    ['自选股',464,282],
+    ['qsz2',464,302],
+    ['1buy',464,322],
+    ['2buy',464,342],
+    ['pazq',464,362],
+    ['pabuy',464,385],
+    ['hot',464,406],
     ['clearstock',848,474],
     ['exit',796,516]
 ]
+
 #沪深排行
 hs_rank_top_menu=[
     ['行情列表',128,64],
@@ -87,10 +134,13 @@ hs_rank_botton_menu=[
 
 # 自选股  top Menu与hs_rank_top_menu一致
 mystock_botton_menu=[
-    ['自选股',114,519],
-    ['long',222,519],
-    ['hot',267,519],
-    ['qsz2', 176, 519]
+    ['自选股',122,519],
+    ['qsz2', 176, 519],
+    ['1buy',222,519],
+    ['2buy',266,519],
+    ['pazq',308,519],
+    ['pabuy',345,519],
+    ['hot',387,519]
 ]
 
 #自动向自选股添加需要的标的
@@ -108,7 +158,7 @@ def add_stock_2_mystock(group_name,stock_list):
         return
 
     found=False
-    for item in setup_my_stock:
+    for item in setup_my_stock_ui_item:
         if group_name==item[0]:
             pyautogui.click(item[1],item[2])
             found=True
@@ -118,12 +168,13 @@ def add_stock_2_mystock(group_name,stock_list):
         return
 
     found = False
-    for item in setup_my_stock:
+    for item in setup_my_stock_ui_item:
         if 'clearstock' == item[0]:
             time.sleep(0.1)
             pyautogui.click(item[1], item[2])
             found = True
             time.sleep(0.1)
+
             #清空自选股
             hwnd_dfcf = win32gui.FindWindow(None, '清空自选股')
             if hwnd_dfcf > 0:
@@ -141,15 +192,18 @@ def add_stock_2_mystock(group_name,stock_list):
         press_keys(key_list)
         time.sleep(0.2)
 
-    for item in setup_my_stock:
+    for item in setup_my_stock_ui_item:
         if 'exit' == item[0]:
             pyautogui.click(item[1], item[2])
             break
 
 def write_log_msg():
     import traceback
+    now = datetime.datetime.now()
     f = open("errorlog.txt", "a")
+    f.write(str(now))
     f.write(traceback.format_exc())
+    f.close()
     print(traceback.format_exc())
 
 
@@ -250,7 +304,7 @@ def  close_welcome():
     return close_window(caption="东方财富    [按Esc关闭本窗口]")
 
 
-def openDFCF(file=file):
+def openDFCF(file=dfcf_main_file):
     prs = subprocess.Popen([file])
 
     #等待欢迎提示窗体，出现后关闭它，最长等待35秒
@@ -302,7 +356,7 @@ def press_keys(key_list):
     for key in key_list:
         for _ in range(key[1]):
             pyautogui.keyDown(key[0])
-            time.sleep(0.1)
+            time.sleep(0.05)
             pyautogui.keyUp(key[0])
             time.sleep(0.1)
 
@@ -445,10 +499,10 @@ def export_allstock_real_add_holding():
 
 
 #实时加仓数据  增仓排名
-def export_allstock_real_add_holding():
+def export_allstock_real_add_holding(botton_menu='沪深A股'):
     click_points=[
         [dfcf_menu_points,'沪深排行'],    #沪深排行
-        [hs_rank_botton_menu, '沪深A股'],
+        [hs_rank_botton_menu, botton_menu],
         [hs_rank_top_menu, '增仓排名'],   #增仓排名
         [204, 312]   #呼出右键菜单
     ]
@@ -465,21 +519,13 @@ def export_allstock_real_add_holding():
     return  export_dfcf_data(click_points,key_list)
 
 
-def export_mystock_real_add_holding(index=0):
-    if index==0:
-        click_points=[
-            [dfcf_menu_points,'自选股'],    #沪深排行
-            [mystock_botton_menu, '自选股'],
-            [hs_rank_top_menu, '增仓排名'],   #增仓排名
-            [204, 312]   #呼出右键菜单
-        ]
-    else:
-        click_points = [
-            [dfcf_menu_points, '自选股'],  # 沪深排行
-            [mystock_botton_menu, 'qsz2'],
-            [hs_rank_top_menu, '增仓排名'],  # 增仓排名
-            [204, 312]  # 呼出右键菜单
-        ]
+def export_mystock_real_add_holding(botton_menu='自选股'):
+    click_points = [
+        [dfcf_menu_points, '自选股'],  # 沪深排行
+        [mystock_botton_menu, botton_menu],
+        [hs_rank_top_menu, '增仓排名'],  # 增仓排名
+        [204, 312]  # 呼出右键菜单
+    ]
 
     key_list = [
         ['down', 12],
@@ -692,9 +738,6 @@ def read_allstock_real_capflow():
     non_values = [u'代码', u'名称']
 
     real_status = format_dfcf_export_text(real_status,'',non_values)
-
-
-
     print(real_status.loc[:2])
 
 
@@ -759,23 +802,38 @@ def read_real_status(all_stock=True,mystock=0):
 
     print(real_status.loc[:2])
 
-def read_real_add_holding(all_stock=True,mystock=0):
+def read_real_add_holding(all_stock=True,botton_menu='沪深A股'):
     if all_stock:
-        real_status = export_allstock_real_add_holding()  # export_mystock_real_status()  #      export_real_capflow()
+        real_status = export_allstock_real_add_holding(botton_menu)  # export_mystock_real_status()  #      export_real_capflow()
     else:
-        real_status = export_mystock_real_add_holding(index=mystock)  # export_real_capflow()
+        real_status = export_mystock_real_add_holding(botton_menu)  # export_real_capflow()
 
     values=[u'序',u'代码', u'最新', u'涨幅%',
-           u'今日增仓占比', u'今日排名',u'今日排名变化', u'今日涨幅 %',
-           u'3日增仓占比', u'3日排名', u'3日排名变化', u'3日涨幅 %',
-           u'5日增仓占比', u'5日排名', u'5日排名变化', u'5日涨幅 %',
-           u'10日增仓占比', u'10日排名', u'10日排名变化', u'10日涨幅 %'
+           u'今日增仓占比', u'今日排名',u'今日排名变化', u'今日涨幅%',
+           u'3日增仓占比', u'3日排名', u'3日排名变化',u'3日涨幅%',
+           u'5日增仓占比', u'5日排名', u'5日排名变化',u'5日涨幅%',
+           u'10日增仓占比', u'10日排名', u'10日排名变化',u'10日涨幅%'
     ]
 
+    display_values = [ u'代码',
+              u'今日排名变化', u'3日排名变化',u'5日排名变化',u'10日排名变化',
+              u'今日涨幅%',u'3日涨幅%',u'5日涨幅%',u'10日涨幅%'
+              ]
     non_values = [u'代码', u'名称', u' 所属行业']
-    real_status = format_dfcf_export_text(real_status, '', non_values)
+    real_status = format_dfcf_export_text(real_status, '', non_values)[display_values]
 
-    print(real_status.loc[:2])
+    sort_vols=['今日排名变化','10日涨幅%']
+    real_status=real_status.sort_values(sort_vols,ascending=False)
+    #print(sort_vols)
+    #print(real_status.loc[:10,sort_vols])
+
+    # 使用datetime.now()
+    now = gmTools.get_last_trade_datetime()
+    int_time=now.hour*100+now.minute
+    real_status['time']=int_time
+
+    return real_status
+
 
 def read_real_capflow():
     real_status = export_mystock_real_capflow()  # export_real_capflow()
@@ -787,42 +845,407 @@ def read_real_capflow():
 
     print(real_status.loc[:2])
 
-'''
-多头选股：条件与：15日内创30日新低，10日内连续缩量，
-            条件或：5日内温和上涨，10日内间歇放量，5日内突然放量
-            东方财富条件选股不好用，改用掘金量化终端自行选择
-'''
-def select_long_stock(block=STOCK_BLOCK):
-    stock_list=gmTools.get_block_stock_list(block)
 
-    for stock in stock_list:
-        day_bars=gmTools.read_last_n_kline(stock,4*60*60,60)
-#--------------main -------------------------------------
-screenWidth, screenHeight = pyautogui.size()
-if screenWidth!=1366:
-    #only use in 1366*768
-    win32gui.MessageBox(None,'只能在1366*768分辨率下运行','dfcf接口',0)
-else:
-    hwnd_dfcf=win32gui.FindWindow(None, '东方财富终端')
-    if hwnd_dfcf!=0:
-        win32gui.ShowWindow(hwnd_dfcf, win32con.SW_MAXIMIZE)
+'''
+    多头选股：低位起涨  1 buy
+            条件与：15日内创30日新低，10日内连续缩量，
+                条件或：5日内温和上涨，10日内间歇放量，5日内突然放量
+                东方财富条件选股不好用，改用掘金量化终端自行选择
+
+                中证700 SHSE.000906，  沪深300 SHSE.000300
+    '''
+def get_stock_1buy(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=40,stocks=''):
+        if stocks=='':
+            stock_list = gmTools.get_block_stock_list(block)
+        else:
+            stock_list=stocks
+
+        stock_long=[]
+
+        for stock in stock_list:
+            bars = gmTools.read_last_n_kline(stock, week_in_seconds,count)
+
+            if bars is None:
+                continue
+
+            #条件与：15日内创30日新低，10日内连续缩量
+            closing=bars['close']
+
+            # 15日内创30日新低
+            vol_count = int(count/2)
+            if closing.idxmin()!=closing[-vol_count:].idxmin():
+                continue
+
+            #最近5日收盘价大于5日均价至少3天
+            closing_ma = closing[-vol_count:].rolling(window=5, center=False).mean()
+            tmp=(closing[-5:]>=closing_ma[-5:]).tolist().count(True)>2
+            if tmp==False:
+                continue
+
+            vols = bars['volume'][-vol_count * 2:]
+
+            #15日内连续缩量  vol小于5日均值的数量占60%以上
+            vol_ma=vols.rolling(window=5,center=False).mean()
+            tmp=(vols[-vol_count:]<vol_ma[-vol_count:]).tolist().count(True)
+            if tmp/vol_count<0.5:
+                continue
+
+            #条件或：10日内间歇放量
+            vol_count = 5
+            tmp = (vols[-vol_count:] >2* vol_ma[-vol_count:]).tolist().count(True)/vol_count
+            tmp1=False
+            tmp2=False
+            if tmp<0.2:
+                # 条件或：5日内温和上涨，5日内突然放量
+                tmp1 = (vols[-vol_count:] >  vol_ma[-vol_count:]).tolist().count(True)/vol_count>0.4    #大于5日均线
+                tmp2 = (vols[-vol_count:] > 2* vol_ma[-vol_count:]).tolist().count(True)/vol_count>0.2  #大于5日均线2倍
+
+            if tmp>=0.2 or tmp1 or tmp2:
+                #满足可介入条件
+                stock_long.append(stock[5:])
+
+        #print('stock long count: %d'%len(stock_long))
+        #print( stock_long)
+        return stock_long
+
+#中期起涨  更常见的起涨模式  2buy
+def get_stock_2buy(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=20,stocks=''):
+    if stocks=='':
+        stock_list = gmTools.get_block_stock_list(block)
     else:
-        openDFCF()
+        stock_list=stocks
 
-    time.sleep(3)
-    show_dfcf()
-    time.sleep(3)
+    stock_long = []
+    for stock in stock_list:
+        bars = gmTools.read_last_n_kline(stock, week_in_seconds, count)
+
+        if bars is None or len(bars)<count:
+            continue
+
+        # 条件与：15日内创30日新低，10日内连续缩量
+        closing = bars['close'][-count:]
+
+        # 最近交易日创阶段放量新高
+        if closing.idxmax() != len(closing)-1:
+            continue
+
+        vol_count = int(count / 2)
+        vols = bars['volume'][-count:]
+
+
+        vol_ma = vols.rolling(window=5, center=False).mean()
+
+        #放量日：成交量是5日均线3倍以上、收阳线？？
+        open=bars.loc[len(bars)-1,'open']
+
+        if vols[count-1]<=3*vol_ma[count-1] and closing[count-1]<=open:
+            continue
+
+
+        # 缩量盘整，分析期后半段vol小于5日均值的数量占30%以上,不含新高日
+        tmp = (vols[-vol_count+1:] < vol_ma[-vol_count+1:]).tolist().count(True)
+        if tmp / (vol_count-1) < 0.3:
+            continue
+
+
+        '''
+        # 条件或：10日内间歇放量
+        vol_count = 5
+        tmp = (vols[-vol_count:] > 2 * vol_ma[-vol_count:]).tolist().count(True) / vol_count
+        tmp1 = False
+        tmp2 = False
+        if tmp < 0.2:
+            # 条件或：5日内温和上涨，5日内突然放量
+            tmp1 = (vols[-vol_count:] > vol_ma[-vol_count:]).tolist().count(True) / vol_count > 0.4  # 大于5日均线
+            tmp2 = (vols[-vol_count:] > 2 * vol_ma[-vol_count:]).tolist().count(True) / vol_count > 0.2  # 大于5日均线2倍
+
+        if tmp >= 0.2 or tmp1 or tmp2:
+            # 满足可介入条件
+            stock_long.append(stock[5:])
+        '''
+
+        # 满足可介入条件
+        stock_long.append(stock[5:])
+
+    #print('stock mid long count: %d' % len(stock_long))
+    #print(stock_long)
+    return stock_long
+
+#基于搓揉线的洗盘、见顶检测  很少见到，机会似乎不多
+# 实时状态下检测最近5个交易日是否存在搓揉洗盘的情况
+    #   1、前一日为长上影线K线，上影线长度 / K线全长 > 0.7
+    #   2、后一日为长下影线K线，下影线长度 / K线全长 > 0.7
+def check_washing(kdata,week=5):
+    data_len=len(kdata)
+    washing_index = []  # 洗盘点
+    if data_len-week<1:
+        return washing_index
+
+    for i in range(data_len-week,data_len-1):
+        try:
+            k_hight=kdata.loc[i-1,'high']-kdata.loc[i-1,'low']
+            #阳线
+            if kdata.loc[i-1,'close']-kdata.loc[i-1,'open']>0:
+                k_hight=(kdata.loc[i-1, 'high'] - kdata.loc[i-1, 'close'])/k_hight
+                if k_hight>0.7:
+                    k_low=kdata.loc[i,'high']-kdata.loc[i,'low']
+                    ll=min(kdata.loc[i, 'close'],kdata.loc[i, 'open'] )- kdata.loc[i, 'low']
+                    #不论阴阳
+                    if ll>0.01:
+                        k_low = (ll)/k_low
+                        if k_low>0.7:
+                            washing_index.append(i)
+        except:
+            write_log_msg()
+            pass
+    return  washing_index
+
+
+#检查特定板块或全部关注标的最近5个交易日是否存在情况
+def get_stock_washing(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=20):
+    if block=='':
+        stock_list=sum_pazq_dfcf_stocks()
+    else:
+        stock_list = gmTools.get_block_stock_list(block)
+
+    stock_long = []
+    for stock in stock_list:
+        bars = gmTools.read_last_n_kline(stock, week_in_seconds, count)
+
+        if bars is None:
+            continue
+
+        wash_index=check_washing(bars,week=5)
+
+        if len(wash_index)==0:
+            continue
+
+        # 满足可介入条件
+        stock_long.append(stock[5:])
+
+    print('stock washing count: %d' % len(stock_long))
+    print(stock_long)
+    return stock_long
+
+#获取全部平安自选股和dfcf自选股列表
+def sum_pazq_dfcf_stocks():
+    stocks = gmTools.read_pazq_selfstock_path('pazq')
+    for stock in gmTools.read_dfcf_selfstock_file('dfcf.ebk'):
+        if stock not in stocks:
+            stocks.append(stock)
+
+    return  stocks
+
+#从文件加载dfcf自定义股票列表
+def add_dfcf_stock_2_mystock():
+    f = open('dfcf.ebk', 'r')
+    tmp = f.read()
+    f.close()
+
+    stock_list = []
+    while len(tmp) > 0:
+        try:
+            if '\n' not in tmp:
+                i = len(tmp)
+            else:
+                i = tmp.index('\n')
+
+            if i > 0:
+                stock = tmp[:i]
+                if stock not in stock_list:
+                    stock_list.append(stock)
+
+            tmp = tmp[i + 1:]
+        except:
+            break
+
+
+    add_stock_2_mystock('自选股', stock_list)
+
+
+
+#分析平安证券有关的个股：一致预期、首次评级和调高评级标的介入机会
+def add_pazq_stock_2_mystock():
+    stocks=gmTools.read_pazq_selfstock_path('pazq')
+    tmp=get_stock_1buy(block='',stocks=stocks)
+
+    for stock in get_stock_2buy(block='', stocks=stocks):
+        #剔除同名个股
+        if stock not in tmp:
+            tmp.append(stock)
+    return  tmp#
+
+
+#--------------main --------------------------------60006-----
+hwnd_dfcf=0
+def load_dfcf():
+    global hwnd_dfcf
+    screenWidth, screenHeight = pyautogui.size()
+    if screenWidth!=1366:
+        #only use in 1366*768
+        win32gui.MessageBox(None,'只能在1366*768分辨率下运行','dfcf接口',0)
+    else:
+        hwnd_dfcf=win32gui.FindWindow(None, '东方财富终端')
+        if hwnd_dfcf!=0:
+            win32gui.ShowWindow(hwnd_dfcf, win32con.SW_MAXIMIZE)
+        else:
+            openDFCF()
+
+        time.sleep(1)
+        show_dfcf()
+        time.sleep(1)
+
+def read_save_mystock_real_addholding(mystock_holding,botton_menu='自选股',
+    send2wechat=5,is_all_stocks=False,check_buy=False):
+    save_all_col = ['代码', '今日排名变化', '3日排名变化', '5日排名变化', '10日排名变化', 'time']
+    save_col = ['代码', '今日排名变化', 'time']
+
+    if mystock_holding is None:
+        tmp = read_real_add_holding(all_stock=is_all_stocks, botton_menu=botton_menu)[save_all_col]
+        writer = pd.ExcelWriter(botton_menu + '昨日数据' + str(now.date()) + '.xlsx')
+        tmp.to_excel(writer, '昨日数据')
+        writer.save()
+        mystock_holding = tmp[save_col].copy()
+    else:
+        tmp = read_real_add_holding(all_stock=is_all_stocks, botton_menu=botton_menu)[save_col]
+        mystock_holding = pd.concat([mystock_holding, tmp], ignore_index=True)
+
+    #todo 考虑利用1、3、5、10日的涨幅判断当前走势是否具备介入机会
+    #最近 1、2、2、5日走势
+    if check_buy:
+        all_count=0
+        stocks=[]
+        for stock in list(tmp['代码'].values):
+            if stock[0] == '6':
+                stock = 'SHSE.' + stock
+            else:
+                stock = 'SZSE.' + stock
+
+            if get_stock_1buy('', stocks=[stock]) \
+                    or get_stock_2buy('', stocks=[stock]):
+                stocks.append(stock[5:])
+                all_count += 1
+                if all_count >= 10:
+                    break
+
+        msg =str(last_eob) +' \n[' +botton_menu+ ']加仓:' + str(stocks)
+        wechat.send_market_msg(msg)
+
+    else:
+        msg = str(last_eob) +' \n['+ botton_menu+ ']加仓:' + \
+              str(tmp['代码'][:send2wechat].values)
+        wechat.send_market_msg(msg)
+
+    return  mystock_holding
+
 
 
 if __name__ == '__main__':
-    # 点击首页
-    click_dfcf_menu(menu_points=dfcf_menu_points, menu_name='首页')
+    load_dfcf()
+    mystock_holding=None
+    buy1_holding=None
+    buy2_holding = None
+    pabuy_holding = None
+    allstock_holding=None
+    count=0
 
-    select_long_stock()
+    now = datetime.datetime.now()
+    wechat.send_market_msg(str(now.time())[:5]+ '  dfcf start')
+    last_eob=0
+    next_trade_datetime=str(datetime.datetime.now().date())  #下一交易日
+    stock_list_need_init = True
+    while True:
+        now = datetime.datetime.now()
 
+        #非交易时间段  不做处理
+        int_time=now.hour*100+now.minute
+        if stock_list_need_init and \
+            next_trade_datetime == str(now.date()):
+
+            dailyinit = "dailyinit.txt"
+            if not os.path.isfile(dailyinit):
+                f = open(dailyinit, "wt")
+                tmp = ''
+            else:
+                f = open(dailyinit, "r+")
+                tmp = f.read()
+                f.seek(0)
+
+            if tmp != next_trade_datetime:
+                f.write(next_trade_datetime)
+
+                # 初始化当日可选标的列表
+                stock_list_need_init = False
+                tmp = gmTools.get_stocks_form_blocks(FAVORTE_BLOCKS)
+                add_stock_2_mystock('1buy', get_stock_1buy(block='', stocks=tmp))
+
+                add_stock_2_mystock('2buy', get_stock_2buy(block='', stocks=tmp))
+            f.close()
+            stock_list_need_init = False
+
+        if int_time>1502 or now.hour<9 :
+            mystock_holding=None
+            buy1_holding=None
+            buy2_holding = None
+            pabuy_holding = None
+            allstock_holding=None
+
+            time.sleep(15 * 60)
+            continue
+
+        #次日凌晨初始化下一交易日标的
+        stock_list_need_init = True
+        current_eob = gmTools.get_last_trade_datetime()
+        next_trade_datetime=gmTools.get_next_trade_date(str(current_eob.date()))
+
+        # 交易时间未发生变化，继续等待
+        if not allstock_holding is None \
+            and current_eob==last_eob:
+            time.sleep(5 * 60)
+            continue
+        try:
+            win32gui.ShowWindow(hwnd_dfcf, win32con.SW_MAXIMIZE)
+            last_eob=current_eob
+
+            if count % 3 == 0:
+                #mystock_holding=read_save_mystock_real_addholding(mystock_holding,
+                #                        botton_menu='自选股',send2wechat=5,is_all_stocks=True)
+
+                buy1_holding = read_save_mystock_real_addholding(buy1_holding,
+                                        botton_menu='1buy', send2wechat=5)
+                buy2_holding = read_save_mystock_real_addholding(buy2_holding,
+                                        botton_menu='2buy', send2wechat=5)
+                pabuy_holding = read_save_mystock_real_addholding(pabuy_holding,
+                                        botton_menu='pabuy', send2wechat=5)
+
+            allstock_holding = read_save_mystock_real_addholding(allstock_holding,
+                                    botton_menu='沪深A股', send2wechat=10,
+                                    is_all_stocks=True,check_buy=True)
+
+            if count %5==0:
+                writer = pd.ExcelWriter('沪深A股' + str(now.date()) + '.xlsx')
+                allstock_holding.to_excel(writer, '沪深A股')
+                writer.save()
+        except:
+            write_log_msg()
+
+        count+=1
+        time.sleep(5*60)
+
+    writer = pd.ExcelWriter('沪深A股' + str(now.date()) + '.xlsx')
+    allstock_holding.to_excel(writer, '沪深A股')
+    writer.save()
+
+    pass
 
     '''
-    add_stock_2_mystock('long',['002465','600000'])
+    add_dfcf_stock_2_mystock()
+    add_stock_2_mystock('pabuy', add_pazq_stock_2_mystock())
+    add_stock_2_mystock('1buy', get_stock_1buy(STOCK_BLOCK))
+    add_stock_2_mystock('2buy', get_stock_2buy(STOCK_BLOCK))
+    get_stock_washing(block='')
+    
+    add_stock_2_mystock('1buy',['002465','600000'])
     read_real_period_static(False, 0)
     read_real_period_static(False, 1)
     read_real_period_static(True)
