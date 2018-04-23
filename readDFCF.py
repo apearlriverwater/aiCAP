@@ -56,7 +56,7 @@ import pandas as pd
 import os
 import numpy as np
 import gmTools
-import infWECHAT as wechat
+
 
 '''
 -----------掘金主要指数--------------------------------
@@ -87,7 +87,7 @@ STOCK_BLOCK = 'SHSE.000906'
 FAVORTE_BLOCKS=['SHSE.000009','SHSE.000016','SHSE.000097','SHSE.000300',
                 'SHSE.000838','SZSE.399008','SZSE.399012','SZSE.399013','SZSE.399673']
 
-dfcf_main_file = "E:\\02soft\\99eastmoney\\swc8\\mainfree.exe"
+dfcf_main_file = "c:\\eastmoney\\swc8\\mainfree.exe"
 dfcf_menu_points=[
     ['首页',28,44],
     ['全景图',108,44],
@@ -201,7 +201,7 @@ def write_log_msg():
     import traceback
     now = datetime.datetime.now()
     f = open("errorlog.txt", "a")
-    f.write(str(now))
+    f.write('\n'+str(now)+'\n')
     f.write(traceback.format_exc())
     f.close()
     print(traceback.format_exc())
@@ -738,7 +738,7 @@ def read_allstock_real_capflow():
     non_values = [u'代码', u'名称']
 
     real_status = format_dfcf_export_text(real_status,'',non_values)
-    print(real_status.loc[:2])
+    return real_status
 
 
 def read_mystock_real_capflow(index=0):
@@ -854,7 +854,8 @@ def read_real_capflow():
 
                 中证700 SHSE.000906，  沪深300 SHSE.000300
     '''
-def get_stock_1buy(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=40,stocks=''):
+def get_stock_1buy(block='SHSE.000906',
+    week_in_seconds=4 * 60 * 60,count=40,stocks=''):
         if stocks=='':
             stock_list = gmTools.get_block_stock_list(block)
         else:
@@ -868,7 +869,7 @@ def get_stock_1buy(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=40,stoc
             if bars is None:
                 continue
 
-            #条件与：15日内创30日新低，10日内连续缩量
+
             closing=bars['close']
 
             # 15日内创30日新低
@@ -876,9 +877,9 @@ def get_stock_1buy(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=40,stoc
             if closing.idxmin()!=closing[-vol_count:].idxmin():
                 continue
 
-            #最近5日收盘价大于5日均价至少3天
+            #最近5日收盘价大于5日均价至少4天
             closing_ma = closing[-vol_count:].rolling(window=5, center=False).mean()
-            tmp=(closing[-5:]>=closing_ma[-5:]).tolist().count(True)>2
+            tmp=(closing[-5:]>=closing_ma[-5:]).tolist().count(True)>3
             if tmp==False:
                 continue
 
@@ -891,14 +892,14 @@ def get_stock_1buy(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=40,stoc
                 continue
 
             #条件或：10日内间歇放量
-            vol_count = 5
-            tmp = (vols[-vol_count:] >2* vol_ma[-vol_count:]).tolist().count(True)/vol_count
+            vol_count = 10
+            tmp = (vols[-vol_count:] >3* vol_ma[-vol_count:]).tolist().count(True)/vol_count
             tmp1=False
             tmp2=False
             if tmp<0.2:
                 # 条件或：5日内温和上涨，5日内突然放量
                 tmp1 = (vols[-vol_count:] >  vol_ma[-vol_count:]).tolist().count(True)/vol_count>0.4    #大于5日均线
-                tmp2 = (vols[-vol_count:] > 2* vol_ma[-vol_count:]).tolist().count(True)/vol_count>0.2  #大于5日均线2倍
+                tmp2 = (vols[-vol_count:] > 3* vol_ma[-vol_count:]).tolist().count(True)/vol_count>0.4  #大于5日均线2倍
 
             if tmp>=0.2 or tmp1 or tmp2:
                 #满足可介入条件
@@ -909,7 +910,8 @@ def get_stock_1buy(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=40,stoc
         return stock_long
 
 #中期起涨  更常见的起涨模式  2buy
-def get_stock_2buy(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=20,stocks=''):
+def get_stock_2buy(block='SHSE.000906',
+    week_in_seconds=4 * 60 * 60,count=20,stocks=''):
     if stocks=='':
         stock_list = gmTools.get_block_stock_list(block)
     else:
@@ -922,7 +924,6 @@ def get_stock_2buy(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=20,stoc
         if bars is None or len(bars)<count:
             continue
 
-        # 条件与：15日内创30日新低，10日内连续缩量
         closing = bars['close'][-count:]
 
         # 最近交易日创阶段放量新高
@@ -941,40 +942,21 @@ def get_stock_2buy(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=20,stoc
         if vols[count-1]<=3*vol_ma[count-1] and closing[count-1]<=open:
             continue
 
-
         # 缩量盘整，分析期后半段vol小于5日均值的数量占30%以上,不含新高日
         tmp = (vols[-vol_count+1:] < vol_ma[-vol_count+1:]).tolist().count(True)
         if tmp / (vol_count-1) < 0.3:
             continue
 
-
-        '''
-        # 条件或：10日内间歇放量
-        vol_count = 5
-        tmp = (vols[-vol_count:] > 2 * vol_ma[-vol_count:]).tolist().count(True) / vol_count
-        tmp1 = False
-        tmp2 = False
-        if tmp < 0.2:
-            # 条件或：5日内温和上涨，5日内突然放量
-            tmp1 = (vols[-vol_count:] > vol_ma[-vol_count:]).tolist().count(True) / vol_count > 0.4  # 大于5日均线
-            tmp2 = (vols[-vol_count:] > 2 * vol_ma[-vol_count:]).tolist().count(True) / vol_count > 0.2  # 大于5日均线2倍
-
-        if tmp >= 0.2 or tmp1 or tmp2:
-            # 满足可介入条件
-            stock_long.append(stock[5:])
-        '''
-
         # 满足可介入条件
         stock_long.append(stock[5:])
 
-    #print('stock mid long count: %d' % len(stock_long))
-    #print(stock_long)
     return stock_long
 
 #基于搓揉线的洗盘、见顶检测  很少见到，机会似乎不多
 # 实时状态下检测最近5个交易日是否存在搓揉洗盘的情况
-    #   1、前一日为长上影线K线，上影线长度 / K线全长 > 0.7
-    #   2、后一日为长下影线K线，下影线长度 / K线全长 > 0.7
+    #   1、前一日为长上影线K线，上影线长度 / K线全长 > 0.7  最大涨幅大于5%
+    #   2、后一日为长下影线K线，下影线长度 / K线全长 > 0.7  最大跌幅大于5%
+    #   返回搓揉线出现的位置
 def check_washing(kdata,week=5):
     data_len=len(kdata)
     washing_index = []  # 洗盘点
@@ -982,16 +964,20 @@ def check_washing(kdata,week=5):
         return washing_index
 
     for i in range(data_len-week,data_len-1):
+        if i-2<0:
+            continue
+
         try:
             k_hight=kdata.loc[i-1,'high']-kdata.loc[i-1,'low']
-            #阳线
-            if kdata.loc[i-1,'close']-kdata.loc[i-1,'open']>0:
+            #阳线  长上影
+            if kdata.loc[i-1,'close']-kdata.loc[i-1,'open']>0 \
+              and kdata.loc[i-1,'high']/kdata.loc[i-2,'open']>1.03:
                 k_hight=(kdata.loc[i-1, 'high'] - kdata.loc[i-1, 'close'])/k_hight
                 if k_hight>0.7:
                     k_low=kdata.loc[i,'high']-kdata.loc[i,'low']
                     ll=min(kdata.loc[i, 'close'],kdata.loc[i, 'open'] )- kdata.loc[i, 'low']
-                    #不论阴阳
-                    if ll>0.01:
+                    #不论阴阳  长下影
+                    if ll>=0.01 and kdata.loc[i, 'low']/kdata.loc[i-1, 'close']<0.97:
                         k_low = (ll)/k_low
                         if k_low>0.7:
                             washing_index.append(i)
@@ -1001,30 +987,48 @@ def check_washing(kdata,week=5):
     return  washing_index
 
 
-#检查特定板块或全部关注标的最近5个交易日是否存在情况
-def get_stock_washing(block='SHSE.000906',week_in_seconds=4 * 60 * 60,count=20):
-    if block=='':
-        stock_list=sum_pazq_dfcf_stocks()
-    else:
-        stock_list = gmTools.get_block_stock_list(block)
+#检查特定板块或全部关注标的最近5个交易日是否存在洗盘情况
+def get_stock_washing(stock_list,
+    week_in_seconds=4 * 60 * 60,count=20,
+    cacl_reward=False):
 
+    now = datetime.datetime.now()
     stock_long = []
+    f = open(str(now.date()) + '-washing.txt', 'at')
+
     for stock in stock_list:
-        bars = gmTools.read_last_n_kline(stock, week_in_seconds, count)
+        bars = gmTools.read_last_n_kline(stock, week_in_seconds, count+10)
 
         if bars is None:
             continue
 
-        wash_index=check_washing(bars,week=5)
+        wash_index=check_washing(bars,week=count)
 
         if len(wash_index)==0:
             continue
 
+        print(stock[5:])
+
+        if cacl_reward:
+            #评估搓揉线的操作价值
+            # 以搓揉线后的第二日开盘价买入，3日后以收盘价卖出的收益
+            for washing_index in wash_index:
+                if washing_index+4<count+10:
+                    try:
+                        reward2=int(bars.loc[washing_index+2,'close']/bars.loc[washing_index+1,'open']*100)-100
+                        reward5 = int(bars.loc[washing_index + 5, 'close'] / bars.loc[washing_index + 1, 'open'] * 100) - 100
+                        reward15 = int(bars.loc[washing_index + 15, 'close'] / bars.loc[washing_index + 1, 'open'] * 100) - 100
+                        f.write("%s,%s,2:%s,5:%s,15:%s\n"%(stock[5:],
+                            bars.loc[washing_index+1,'eob'].date(),reward2,reward5,reward15))
+
+                    except:
+                        break
+
         # 满足可介入条件
         stock_long.append(stock[5:])
 
+    f.close()
     print('stock washing count: %d' % len(stock_long))
-    print(stock_long)
     return stock_long
 
 #获取全部平安自选股和dfcf自选股列表
@@ -1037,7 +1041,7 @@ def sum_pazq_dfcf_stocks():
     return  stocks
 
 #从文件加载dfcf自定义股票列表
-def add_dfcf_stock_2_mystock():
+def load_dfcf_stock_2_mystock():
     f = open('dfcf.ebk', 'r')
     tmp = f.read()
     f.close()
@@ -1058,7 +1062,6 @@ def add_dfcf_stock_2_mystock():
             tmp = tmp[i + 1:]
         except:
             break
-
 
     add_stock_2_mystock('自选股', stock_list)
 
@@ -1095,16 +1098,24 @@ def load_dfcf():
         show_dfcf()
         time.sleep(1)
 
+mail_conten=''
 def read_save_mystock_real_addholding(mystock_holding,botton_menu='自选股',
-    send2wechat=5,is_all_stocks=False,check_buy=False):
+    send2wechat=5,is_all_stocks=False,check_buy=False,is_send_mail=False):
+    global mail_conten
+
+    now = datetime.datetime.now()
+    #import infWECHAT as wechat
     save_all_col = ['代码', '今日排名变化', '3日排名变化', '5日排名变化', '10日排名变化', 'time']
     save_col = ['代码', '今日排名变化', 'time']
 
-    if mystock_holding is None:
+    if mystock_holding is None :
         tmp = read_real_add_holding(all_stock=is_all_stocks, botton_menu=botton_menu)[save_all_col]
-        writer = pd.ExcelWriter(botton_menu + '昨日数据' + str(now.date()) + '.xlsx')
-        tmp.to_excel(writer, '昨日数据')
-        writer.save()
+        if  is_all_stocks:
+            writer = pd.ExcelWriter(botton_menu + '昨日数据' + str(now.date()) + '.xlsx')
+            tmp.to_excel(writer, '昨日数据')
+            writer.save()
+            writer.close()
+
         mystock_holding = tmp[save_col].copy()
     else:
         tmp = read_real_add_holding(all_stock=is_all_stocks, botton_menu=botton_menu)[save_col]
@@ -1128,32 +1139,60 @@ def read_save_mystock_real_addholding(mystock_holding,botton_menu='自选股',
                 if all_count >= 10:
                     break
 
-        msg =str(last_eob) +' \n[' +botton_menu+ ']加仓:' + str(stocks)
-        wechat.send_market_msg(msg)
+        msg ='\n[' +botton_menu+ ']加仓:' + str(stocks)
+        #send_mail("市场动态",msg=msg)
+        #wechat.send_market_msg(msg)
 
     else:
-        msg = str(last_eob) +' \n['+ botton_menu+ ']加仓:' + \
-              str(tmp['代码'][:send2wechat].values)
-        wechat.send_market_msg(msg)
+        msg = '\n['+ botton_menu+ ']加仓:' + str(tmp['代码'][:send2wechat].values)
+        #wechat.send_market_msg(msg)
+        pass
+
+    mail_conten += msg
+    if is_send_mail:
+            send_mail("市场动态", msg=mail_conten)
+            mail_conten=''
+            print('send msg to user')
+
 
     return  mystock_holding
 
+def send_mail(title,msg):
+    import smtplib
 
+    from email.mime.text import MIMEText
+    from email.header import Header
 
-if __name__ == '__main__':
+    sender = "haigezyj@qq.com"
+    receiver = ["haigezyj@qq.com"]
+    subject = title
+    smtpserver = "smtp.qq.com"
+    username = 'haigezyj@qq.com'
+    password = "luptgsjeqkdhcgfj"
+
+    msg = MIMEText(msg, 'plain', 'utf-8')  # 中文需参数‘utf-8'，单字节字符不需要
+
+    msg['From'] = Header("旭日东升", 'utf-8')
+    msg['To'] = Header("市场动态", 'utf-8')
+    msg['Subject'] = Header(subject, 'utf-8')
+    smtp = smtplib.SMTP_SSL(smtpserver, 465)
+    smtp.login(username, password)
+    smtp.sendmail(sender, receiver, msg.as_string())
+    smtp.quit()
+
+#交易日循环
+def trade_date_loop():
     load_dfcf()
-    mystock_holding=None
-    buy1_holding=None
+    mystock_holding = None
+    buy1_holding = None
     buy2_holding = None
     pabuy_holding = None
-    allstock_holding=None
-    count=0
-
-    now = datetime.datetime.now()
-    wechat.send_market_msg(str(now.time())[:5]+ '  dfcf start')
+    allstock_holding = None
+    count = 0
     last_eob=0
     next_trade_datetime=str(datetime.datetime.now().date())  #下一交易日
     stock_list_need_init = True
+    data_change=False
     while True:
         now = datetime.datetime.now()
 
@@ -1177,40 +1216,56 @@ if __name__ == '__main__':
                 # 初始化当日可选标的列表
                 stock_list_need_init = False
                 tmp = gmTools.get_stocks_form_blocks(FAVORTE_BLOCKS)
-                add_stock_2_mystock('1buy', get_stock_1buy(block='', stocks=tmp))
+                print(str(now) + ' caculate washing')
+                add_stock_2_mystock('hot', get_stock_1buy(block='', stocks=tmp))
 
+                print(str(now)+' caculate 1buy')
+                add_stock_2_mystock('1buy', get_stock_1buy(block='', stocks=tmp))
+                print(str(now)+' caculate 1buy')
                 add_stock_2_mystock('2buy', get_stock_2buy(block='', stocks=tmp))
+
             f.close()
             stock_list_need_init = False
-
-        if int_time>1502 or now.hour<9 :
+        #'''
+        if  False:# int_time>1520 or now.hour<9 :
             mystock_holding=None
             buy1_holding=None
             buy2_holding = None
             pabuy_holding = None
             allstock_holding=None
 
-            time.sleep(15 * 60)
-            continue
-
-        #次日凌晨初始化下一交易日标的
-        stock_list_need_init = True
-        current_eob = gmTools.get_last_trade_datetime()
-        next_trade_datetime=gmTools.get_next_trade_date(str(current_eob.date()))
-
-        # 交易时间未发生变化，继续等待
-        if not allstock_holding is None \
-            and current_eob==last_eob:
             time.sleep(5 * 60)
             continue
+        #'''
+
         try:
-            win32gui.ShowWindow(hwnd_dfcf, win32con.SW_MAXIMIZE)
+            # 次日凌晨初始化下一交易日标的
+            stock_list_need_init = True
+            current_eob = gmTools.get_last_trade_datetime()
+            next_trade_datetime = gmTools.get_next_trade_date(str(current_eob.date()))
+            # 交易时间未发生变化，继续等待
+            # '''
+            if current_eob == last_eob:
+
+                if not allstock_holding is None and data_change:
+                    data_change = False
+                    writer = pd.ExcelWriter('沪深A股' + str(now.date()) + '.xlsx')
+                    allstock_holding.to_excel(writer, '沪深A股')
+                    writer.save()
+                    writer.close()
+
+                time.sleep(5 * 60)
+                continue
+                # '''
+
+            load_dfcf()
             last_eob=current_eob
 
-            if count % 3 == 0:
-                #mystock_holding=read_save_mystock_real_addholding(mystock_holding,
-                #                        botton_menu='自选股',send2wechat=5,is_all_stocks=True)
+            allstock_holding = read_save_mystock_real_addholding(allstock_holding,
+                                                                 botton_menu='沪深A股', send2wechat=10,
+                                                                 is_all_stocks=True, check_buy=True, is_send_mail=True)
 
+            if count % 3 == 0:
                 buy1_holding = read_save_mystock_real_addholding(buy1_holding,
                                         botton_menu='1buy', send2wechat=5)
                 buy2_holding = read_save_mystock_real_addholding(buy2_holding,
@@ -1220,26 +1275,49 @@ if __name__ == '__main__':
 
             allstock_holding = read_save_mystock_real_addholding(allstock_holding,
                                     botton_menu='沪深A股', send2wechat=10,
-                                    is_all_stocks=True,check_buy=True)
+                                    is_all_stocks=True,check_buy=True,is_send_mail=True)
+            data_change=True
 
             if count %5==0:
                 writer = pd.ExcelWriter('沪深A股' + str(now.date()) + '.xlsx')
                 allstock_holding.to_excel(writer, '沪深A股')
                 writer.save()
+                writer.close()
+                data_change=False
+                print('now ',now)
+
         except:
             write_log_msg()
 
         count+=1
         time.sleep(5*60)
 
-    writer = pd.ExcelWriter('沪深A股' + str(now.date()) + '.xlsx')
-    allstock_holding.to_excel(writer, '沪深A股')
-    writer.save()
+#分析最近2000交易日数据，效果不好，不足以指导操作
+def check_washing_in_sh_sz_2_hot():
+    load_dfcf()
+    tmp = read_allstock_real_capflow()['代码'].tolist()
+    stocks=[]
+    for stock in tmp:
+        if stock[0]=='6':
+            stocks.append('SHSE.'+stock)
+        else:
+            stocks.append('SZSE.' + stock)
 
+    now = datetime.datetime.now()
+    print(str(now) + ' caculate washing')
+    add_stock_2_mystock('hot', get_stock_washing(stock_list=stocks,
+        week_in_seconds=4 * 60 * 60,count=30,cacl_reward=True) )
+
+if __name__ == '__main__':
+
+
+    trade_date_loop()
     pass
 
     '''
-    add_dfcf_stock_2_mystock()
+     check_washing_in_sh_sz_2_hot()
+    load_dfcf_stock_2_mystock()
+    load_dfcf_stock_2_mystock()
     add_stock_2_mystock('pabuy', add_pazq_stock_2_mystock())
     add_stock_2_mystock('1buy', get_stock_1buy(STOCK_BLOCK))
     add_stock_2_mystock('2buy', get_stock_2buy(STOCK_BLOCK))
