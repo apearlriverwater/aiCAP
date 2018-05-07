@@ -7,23 +7,29 @@ import matplotlib.pyplot as plt
 from scipy import optimize
 
 class Test_uint_test(unittest.TestCase):
+    tls.etf_rolling(filters=['CAP-', '.dat'],backtest=True)
+
     '''
     多头选股：条件与：15日内创30日新低，10日内连续缩量，
                 条件或：5日内温和上涨，10日内间歇放量，5日内突然放量
                 东方财富条件选股不好用，改用掘金量化终端自行选择
-    '''
-    def test_stock_long(self, block='SHSE.000300',week_in_seconds=4 * 60 * 60,count=30):
+
+                SHSE.000906  SHSE.000300
+    def test_stock_long(self, block='SHSE.000300',week_in_seconds=4 * 60 * 60,count=60):
 
         stock_list = tls.get_block_stock_list(block)
         stock_long=[]
         for stock in stock_list:
             bars = tls.read_last_n_kline(stock, week_in_seconds,count)
 
+            if bars is None:
+                continue
+
             #条件与：15日内创30日新低，10日内连续缩量
             closing=bars['close']
 
             # 15日内创30日新低
-            vol_count = 15
+            vol_count = int(count/2)
             if closing.idxmin()!=closing[-vol_count:].idxmin():
                 continue
 
@@ -36,22 +42,21 @@ class Test_uint_test(unittest.TestCase):
                 continue
 
             #条件或：10日内间歇放量
-            vol_count = 10
-            tmp = (vols[-vol_count:] >2* vol_ma[-vol_count:]).tolist().count(True)
+            vol_count = int(count/4)
+            tmp = (vols[-vol_count:] >2* vol_ma[-vol_count:]).tolist().count(True)/vol_count
             tmp1=False
             tmp2=False
-            if tmp<2:
+            if tmp<0.2:
                 # 条件或：5日内温和上涨，5日内突然放量
-                tmp1 = (vols[-vol_count:] >  vol_ma[-vol_count:]).tolist().count(True)>4    #大于5日均线
-                tmp2 = (vols[-vol_count:] > 2* vol_ma[-vol_count:]).tolist().count(True)>2 #大于5日均线2倍
+                tmp1 = (vols[-vol_count:] >  vol_ma[-vol_count:]).tolist().count(True)/vol_count>0.4    #大于5日均线
+                tmp2 = (vols[-vol_count:] > 2* vol_ma[-vol_count:]).tolist().count(True)/vol_count>0.2  #大于5日均线2倍
 
-            if tmp>=2 or tmp1 or tmp2:
+            if tmp>=0.2 or tmp1 or tmp2:
                 #满足可介入条件
                 stock_long.append(stock)
-
+        print(stock_long[:5])
         return stock_long
 
-    '''
     def test_cacl_cap(self, cap_path='data0322'):
         tls.cacl_bs_by_cap()
     def test_cacl_cap(self, cap_path='data0322'):

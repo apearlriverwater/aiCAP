@@ -17,10 +17,10 @@ from __future__ import print_function, absolute_import
 import struct
 import os
 import pandas as pd
-import numpy  as np
-import matplotlib.pyplot as plt
-import sys
-from matplotlib.widgets import Slider, Button, RadioButtons
+#import numpy  as np
+#import matplotlib.pyplot as plt
+#import sys
+#from matplotlib.widgets import Slider, Button, RadioButtons
 from matplotlib.widgets import MultiCursor
 from matplotlib.widgets import RectangleSelector
 from pylab import *
@@ -30,7 +30,6 @@ import datetime
 import time
 import talib
 #import ui4backup    #ui interface
-
 def write_log_msg():
     import traceback
     f = open("errorlog.txt", "w")
@@ -210,6 +209,21 @@ def create_market_last_n_data(stocks, count, stop_DateTime,
         # shape(?,g_max_tage)
         train_y.append([make_stage(y)])
 
+def bcd_int2_date_str(data):
+    ret="%02d"%(data%100)  #day
+    data = int(data / 100)
+    ret = "%02d-%s" % (data % 100, ret)  #month
+    ret = "%04d-%s" % (data / 100, ret)  #year
+    return ret
+
+def bcd_int2_time_str(data):
+    ret="%02d"%(data%100)  #second
+    data=int(data/100)
+    ret = "%02d:%s" % (data % 100, ret)  #minute
+    ret = "%02d:%s" % (data / 100, ret)  #hour
+    return ret
+
+
 
 # utc 时间戳转换
 def timestamp_datetime(ts):
@@ -235,7 +249,7 @@ def datetime_timestamp(dt, type='ms'):
             if len(dt) == 10:
                 dt = datetime.strptime(dt.replace('/', '-'), '%Y-%m-%d')
             elif len(dt) == 19:
-                dt = datetime.strptime(dt.replace('/', '-'), '%Y-%m-%d %H:%M:%S')
+                dt = datetime.datetime.strptime(dt.replace('/', '-'), '%Y-%m-%d %H:%M:%S')
             else:
                 raise ValueError()
         except ValueError as e:
@@ -285,7 +299,7 @@ def get_code_in_cap_file(path, filename, minutes, onlyfile=True):
 #	double	m_dblSmallSell, m_dblMidSell, m_dblBigSell, m_dblHugeSell;  4*8
 
 def read_cap_flow(filepath):
-    columns = ['Date', 'Time',
+    columns = ['eob',#''Date', 'Time',
                'SmallBuy', 'MidBuy', 'BigBuy', 'HugeBuy',
                'SmallSell', 'MidSell', 'BigSell', 'HugeSell',
                'SmallBuyVol', 'MidBuyVol', 'BigBuyVol', 'HugeBuyVol',
@@ -309,10 +323,12 @@ def read_cap_flow(filepath):
             index = index + dataSize
 
             if sum(cap[2:10]) >= 100.0:  # 去掉无交易数据
+                eob=bcd_int2_date_str(cap[0])+ ' '+bcd_int2_time_str(cap[1])
+                eob=datetime.datetime.strptime(eob, '%Y-%m-%d %H:%M:%S')
                 # 由于前期数据保存软件设计的原因，数据可能存在重复读写的情况，要判断数据的有效性
                 if cap[0] > last_cap[0] \
                         or (cap[0] == last_cap[0] and cap[1] > last_cap[1]):
-                    series.append(cap)
+                    series.append((eob,)+cap[2:])
                     last_cap = cap[:2]
                 else:
                     # 出现数据重复,保留最新的数据
@@ -403,14 +419,12 @@ def read_pazq_selfstock_path(data_path='pazq'):
 
 
 '''
-    均线多头向上判断：多头向上时返回true，否则false
+    主力资金流总量均线多头向上判断：多头向上时返回true，否则false
         dataList 待计算数据
         maList 周期序列列表，最少三个周期,
         nLastWeeks最少程序周期数
         均线单调递增、多头排列
 '''
-
-
 def main_cap_up(data, maList, nLastWeeks):
     bRet = True
     ma = []
@@ -459,6 +473,41 @@ def main_cap_up(data, maList, nLastWeeks):
 
     return bRet
 
+#主力资金流变化趋势多头排列
+def main_delta_cap_up(data, maList, nLastWeeks):
+    bRet = False
+    CaclCount = sum(maList) * 2 + nLastWeeks
+    count = len(data)
+
+    while len(maList) >= 3 and count >= CaclCount:
+        tmp = data[-CaclCount:]
+        # 计算每个周期的主力资金流变化情况
+        mainflow = tmp['BigBuy'] + tmp['HugeBuy'] - tmp['BigSell'] - tmp['HugeSell']
+
+        ma1 = mainflow.rolling(maList[0]).mean().tolist()[-nLastWeeks:]
+
+        #if not cacl_data_trend(ma1,type=1,week=nLastWeeks):  #trends up
+        #    break
+
+        ma2 = mainflow.rolling(maList[1]).mean().tolist()[-nLastWeeks:]
+        #if not cacl_data_trend(ma2,type=1,week=nLastWeeks):  #trends up
+        #    break
+
+        ma3 = mainflow.rolling(maList[2]).mean().tolist()[-nLastWeeks:]
+        #if not cacl_data_trend(ma3,type=1,week=nLastWeeks):  #trends up
+        #    break
+
+        # 分析资金流变化情况的均线趋势  按列排序并进行比较
+        for i in range(1, nLastWeeks):
+            if  not (ma1[i] >= ma2[i] and ma2[i] >= ma3[i]  ):
+                break
+
+        if i==nLastWeeks-1:
+            bRet=True
+
+        break
+
+    return bRet
 
 '''
     均线多头向下判断：多头向下时返回true，否则false
@@ -467,8 +516,6 @@ def main_cap_up(data, maList, nLastWeeks):
         nLastWeeks最少程序周期数
         单调递减、空头排列
 '''
-
-
 def IsCAPMaDown(data, maList, nLastWeeks):
     bRet = True
     ma = []
@@ -695,7 +742,7 @@ def get_stock_by_market(exchange, sec_type, is_active, return_list=True):
 '''
 
 '''
-利用掘金终端的函数读取需要的K线数据
+利用掘金终端的函数读取需要的K线数据:有时会丢个别K线数据
 get_bars 提取指定时间段的历史Bar数据，支持单个代码提取或多个代码组合提取。策略类和行情服务类都提供该接口。
 get_bars(symbol_list, bar_type, begin_time, end_time)
         参数名	类型	说明
@@ -704,9 +751,11 @@ get_bars(symbol_list, bar_type, begin_time, end_time)
         begin_time	string	开始时间, 如2015-10-30 09:30:00
         end_time	string	结束时间, 如2015-10-30 15:00:00
 return:dataframe  'eob','open','high','low','close','volume','amount'
+返回值没有唯一的索引ID
 '''
 def read_kline(symbol_list, weeks_in_seconds,
                begin_time, end_time, max_record=50000):
+
     if (True):
         start_time = begin_time
         stop_time = end_time
@@ -723,6 +772,7 @@ def read_kline(symbol_list, weeks_in_seconds,
                     freq = '1d'
                 else:
                     freq = '%ds' % (weeks_in_seconds)
+
                 # 数据有时有问题，数据缺失
                 bars = history(symbol_list, frequency=freq,
                                start_time=start_time, end_time=stop_time,
@@ -733,6 +783,9 @@ def read_kline(symbol_list, weeks_in_seconds,
                     kdata = bars.copy()
                 else:
                     kdata = kdata.append(bars)
+                    #重新建立唯一的ID索引
+                    kdata = kdata.set_index('eob')
+                    kdata=kdata.reset_index()
 
                 count = len(bars)
                 # TODO 一次最多处理10000项以内数据，超出应有所提示
@@ -938,17 +991,16 @@ def draw_bs_on_kline(stock, kdata, buy_time, sell_time,
 
     return reward
 
-
+#技术分析可视化界面
 #逐步增加处理，操作图形显示的内容，实现人机交互
+#K线、RSI和主力资金变化均处于多头，且RSI处于安全范围【45-85】
 def draw_stock_ta_fig(stock, ma, kdata, cap_data,
-                              week=30, hold_week=60,
-                              rsi_low=30, rsi_up=70,
-                              buy_point=0, sell_point=0, fig_count=310):
+                              kweek, hold_week,rsi_low, rsi_up,
+                              bs, fig_count,bs_msg):
+
     fig = plt.figure(figsize=(12, 6))
-    ax1 = fig.add_subplot(4, 1, 1)
-    ax2 = fig.add_subplot(4, 1, 2)
-    ax3 = fig.add_subplot(4, 1, 3)
-    ax4 = fig.add_subplot(4, 1, 4)
+
+
 
     left_space = 0.10
     widgets_start = 0.025
@@ -981,16 +1033,19 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
     def cacl_main_cap_total(cap_data):
         count = len(cap_data)
         cols = [['HugeBuy', 'HugeSell'], ['BigBuy', 'BigSell']]  # , ['MidBuy', 'MidSell'], ['SmallBuy', 'SmallSell']]
-        for buy, sell in cols:
-            flow = (cap_data[buy] - cap_data[sell]).values
-            total_flow = [flow[0]]
-            for i in range(1, count):
-                total_flow.append(total_flow[i - 1] + flow[i])
+        total_flow = [0 for i in range(count)]
+
+        flow = (cap_data['HugeBuy'] - cap_data['HugeSell'] + \
+                      cap_data['BigBuy'] - cap_data['BigSell']).values
+
+        total_flow[0]=flow[0]
+
+        for i in range(1, count):
+            total_flow[i]=(total_flow[i - 1] + flow[i])
 
         return total_flow
 
-    def draw_rsi(kdata, ax, low=30, high=70,
-                 rsi_low=30, rsi_up=70):
+    def draw_rsi(kdata, ax, rsi_low=30, rsi_up=70):
         count = len(kdata)
         ax.set_ylabel('RSI')
         closing = kdata['close'].values
@@ -1009,15 +1064,14 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
                 RSI26, color='red', label='RSI26')
 
         ax.plot(list(range(count)),
-                 [rsi_up for i in range(count)], color='red')
+                 [rsi_up for i in range(count)], color='yellow',label='U'+str(rsi_up))
         ax.plot(list(range(count)),
-                 [rsi_low for i in range(count)], color='green')
+                 [rsi_low for i in range(count)], color='green',label='D'+str(rsi_low))
 
         ax.legend(loc='upper left', shadow=True, fontsize='x-large')
 
     #
-    def draw_cap_main(cap_data, buy_point, sell_point,
-                      week, fig_id=313, draw_delta=False):
+    def draw_cap_main(cap_data,week,fig_id=313, draw_delta=False):
         min_week_of_trend = 60
         ax = plt.subplot(fig_id)
         count = len(cap_data)
@@ -1044,15 +1098,15 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
         else:
             plt.ylabel('MAIN DELTA')
 
-            ma5 = flow.rolling(5).mean().tolist()
-            ma10 = flow.rolling(week).mean().tolist()
+            ma5 = flow.rolling(week).mean().tolist()
+            ma10 = flow.rolling(week*2).mean().tolist()
             plt.plot(list(range(count)),
                      flow, color='gray', label='delta')
 
             plt.plot(list(range(count)), [0 for _ in range(count)], color='black')
 
-            plt.plot(list(range(count)), ma5, color='red', label='ma5')
-            plt.plot(list(range(count)), ma10, color='blue', label='ma' + str(week))
+            plt.plot(list(range(count)), ma5, color='red', label='ma' + str(week))
+            plt.plot(list(range(count)), ma10, color='blue', label='ma' + str(week*2))
 
             plt.legend(loc='upper left', shadow=True, fontsize='x-large')
 
@@ -1064,25 +1118,28 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
 
         return ax
 
-    def draw_kline(stock, cap_data,kdata,stage_days, buy_point, sell_point,
-                   week, hold_week, ax, main_flow=None):
+    def draw_kline(stock, cap_data,kdata,stage_days, bs,
+                   week,kweek, hold_week, ax, main_flow=None,title_msg=''):
+
 
         #ax = plt.subplot(fig_id)
+        ax2 = ax
+        ax = ax2.twinx()
+
         count = len(kdata)
         ax.clear()
         ax.set_ylabel('PRICE')
 
         closing = kdata['close']
+        week2=week*2
         ma1=closing.rolling(week).mean()
-        ma2 = closing.rolling(week ).mean()
+        ma2 = closing.rolling(week2).mean()
         closing = closing.values
 
         data = closing.tolist()
 
         try:
             time_list = kdata['eob'].tolist()
-            buy_price = data[buy_point]
-            sell_price = data[sell_point]
         except:
             write_log_msg()
             reward = 0
@@ -1097,97 +1154,114 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
         ax.plot(list(range(count)),
                  ma1, color='red', label=str(week))
         ax.plot(list(range(count)),
-                 ma2, color='black', label=str(week*5))
+                 ma2, color='black', label=str(week2))
 
-        # 主力大单突变点计算与显示
-        #vol_changes=vol_big_change(cap_data,kdata,week)
-        #for index,fig_type in vol_changes:
-        #    ax.plot(index,data[index], fig_type)
-
+        msg=''
         #阶段新高、新低检测
         high_low_list=check_stage_high_low(kdata,
                     stage_days)
-        for _,index,fig_type in high_low_list:
-            ax.plot(index,data[index]*1.02, fig_type)
 
-        washing=check_washing_stock(kdata,50) #stage_days[0])
+        for week,index,fig_type in high_low_list:
+            ax.plot(index,data[index]*1.02, fig_type)
+            if fig_type=='rx':
+                msg+="(%d,%d)high,"%(week,index)
+            else:
+                msg += "(%d,%d)low," % (week, index)
+
+
+        washing=check_washing_stock(kdata,len(kdata)-min(stage_days)) #stage_days[0])
         if len(washing)>0:
             for index,fig_type in washing:
                 ax.plot(index,data[index]*1.02, fig_type)
+                msg += "(%d)wash," % (index)
 
-        if buy_point == sell_point:
-            # no sell time,sell on maxholding weeks
-            if buy_point + hold_week < len(time_list):
-                sell_time = time_list[buy_point + hold_week]
-            else:
-                sell_time = time_list[-1]
 
-            no_sell = True
-        else:
-            no_sell = False
+        #买卖点信息20180506  ????  display error
+        for sell,buy in bs:
+            ax.plot(buy, data[buy] , 'go')
+            ax.plot(sell, data[sell], 'ro')
 
-        if not no_sell:
-            plt.annotate(str(buy_point), xy=(buy_point, buy_price),
-                         xytext=(buy_point, buy_price),
-                         arrowprops=dict(facecolor='red', shrink=0.05),
-                         )
 
-            sell_price = data[sell_point]
-
-            plt.annotate(str(sell_point), xy=(sell_point, sell_price),
-                         xytext=(sell_point, sell_price),
-                         arrowprops=dict(facecolor='green', shrink=0.05),
-                         )
-            reward = int(sell_price * 100 / buy_price - 100)
-        else:
-            reward = 0
-
-        # display start date,mid date and stop date
-        x = int(len(time_list) / 2)
-        date_high = min(closing)
-        #plt.annotate(str(time_list[x].date()), xy=(x, date_high),
-        #             xytext=(x, date_high),
-        #             arrowprops=dict(facecolor='black', shrink=0.05),
-        #             )
-
-        if no_sell:
-            buy_time = time_list[0].strftime('%Y-%m-%d %H-%M-%S')
-            sell_time = time_list[-1].strftime('%Y-%m-%d %H-%M-%S')
-            title = '%s week=%d \n %s--%s' % (stock, week, buy_time, sell_time)
-        else:
-            buy_time = time_list[buy_point].strftime('%Y-%m-%d %H-%M-%S')
-            sell_time = time_list[sell_point].strftime('%Y-%m-%d %H-%M-%S')
-            title = '%s week=%d reward=%d%%\n %s--%s' \
-                    % (stock, week, reward, buy_time, sell_time)
-
+        title = '%s,week=%d,%s\n' % (stock, kweek,time_list[-1].strftime('%Y-%m-%d %H-%M-%S'))
         ax.legend(loc='upper left', shadow=True, fontsize='x-large')
+
+        if len(msg)>1:
+            title+=msg
+
+        if len(title_msg)>1:
+            title+='\n'+title_msg
 
         ax.set_title(title)
 
         if main_flow != None:
-            ax2 = ax.twinx()
             ax2.plot(list(range(count)), main_flow, 'brown',lw=3)
             ax2.set_ylabel('main total flow')
+            ax.format_coord = format_coord1
+        else:
+            ax2.format_coord = format_coord1
 
-    #todo add sunplot in fingure
-    def add_subplot():
-        pass
-        
+
+    #self define status
+    def format_coord1(x, y):
+        col = int(x + 0.5)
+        if col >= len(kdata) or col < 1:
+            return 'x=%d, y=%1.4f' % (col, y)
+
+        row = int(y + 0.5)
+
+        return 'kline %s,x=%d, y=%1.4f' % (kdata.loc[col-1,'eob'].strftime('%Y-%m-%d %H-%M-%S'),col, y)
+
+    def format_coord2(x, y):
+        col = int(x + 0.5)
+        if col >= len(kdata) or col < 1:
+            return 'x=%d, y=%1.4f' % (col, y)
+
+        row = int(y + 0.5)
+
+        return 'vol %s,x=%d, y=%1.4f' % (kdata.loc[col-1,'eob'].strftime('%Y-%m-%d %H-%M-%S'),col, y)
+
+    def format_coord3(x, y):
+        col = int(x + 0.5)
+        if col >= len(kdata) or col < 1:
+            return 'x=%d, y=%1.4f' % (col, y)
+
+        row = int(y + 0.5)
+
+        return 'main delta %s,x=%d, y=%1.4f' % (kdata.loc[col-1,'eob'].strftime('%Y-%m-%d %H-%M-%S'),col, y)
+
+    def format_coord4(x, y):
+        col = int(x + 0.5)
+        if col>=len(kdata) or col<1:
+            return 'x=%d, y=%1.4f' % (col, y)
+
+        row = int(y + 0.5)
+
+        return 'rsi %s,x=%d, y=%1.4f' % (kdata.loc[col-1,'eob'].strftime('%Y-%m-%d %H-%M-%S'),col, y)
+
     #todo 结合ticks分析成交量的组成，特别是主力资金的占比
     def draw_vol(kdata, week, fig_id=515, cap_data=[]):
         count = len(kdata)
         ax = plt.subplot(fig_id)
 
-        vol = kdata['volume']/1e6
+        vol = kdata['amount']/1e6  #amount volume
         x = list(range(count))
         plt.plot(x, vol, color='black', label='vol')
         plt.ylabel('VOLx1E6')
 
+        msg=''
         # 主力大单突变点计算与显示
         vol_changes = vol_big_change(cap_data, kdata, week)
         for index, fig_type in vol_changes:
-            ax.plot(index, vol[index], fig_type)
-
+            try:
+                ax.plot(index, vol[index], fig_type)
+                if index>count-10:
+                    if fig_type=='go':
+                        msg+=",%d big buy"%index
+                    else:
+                        msg += ",%d big sell" % index
+            except:
+                write_log_msg()
+                break
         #ma = vol.rolling(week).mean()
         #plt.plot(x, ma, color='black', label='ma', lw=2)
 
@@ -1233,9 +1307,13 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
                 color += 1
 
             ax2.legend(loc='upper left', shadow=True, fontsize='x-large')
+            ax2.format_coord=format_coord2
+        else:
+            ax.format_coord = format_coord2
+
         #cols=['Date', 'Time','vol','amt','Huge','Big','Huge_vol','Big_vol']
         #tmp=cap_data[cols]
-        return ax
+        return msg
 
     #成交量突变检测
     def vol_big_change(cap_data,kdata,week):
@@ -1287,15 +1365,15 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
         ret=[]
         data_len=len(kdata)
 
-        for i in range(max(weeks),data_len):
+        for i in range(data_len-min(weeks),data_len):
             cur_high = kdata.loc[i - 1, 'high']
             cur_low = kdata.loc[i - 1, 'low']
             for week in weeks:
                 high=max(kdata.loc[i-week:i,'high'])
                 low= min(kdata.loc[i-week:i,'low'])
-                if high-cur_high<0.01:
+                if high==cur_high:
                     ret.append([week,i,'rx'])
-                elif cur_low-low<0.01:
+                elif cur_low==low:
                     ret.append([week, i, 'gx'])
 
         return ret
@@ -1325,7 +1403,12 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
                 pass
         return  washing_index
 
+    def start():
+        pass
+
     #FUNCTION STARTS..............................
+
+
     # 部件显示位置及颜色
     axcolor = 'lightgoldenrodyellow'
     my_cmd_ax = plt.axes([my_cmd_x, widgets_start,
@@ -1336,6 +1419,10 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
     button.on_clicked(my_cmd)
 
     fig.canvas.mpl_connect('key_press_event', press)
+    ax1 = fig.add_subplot(4, 1, 1)
+    ax2 = fig.add_subplot(4, 1, 2)
+    ax3 = fig.add_subplot(4, 1, 3)
+    ax4 = fig.add_subplot(4, 1, 4)
 
     # drawtype is 'box' or 'line' or 'none'
     toggle_selector.RS = RectangleSelector(ax1, rect_select_callback,
@@ -1347,73 +1434,95 @@ def draw_stock_ta_fig(stock, ma, kdata, cap_data,
 
     plt.connect('key_press_event', toggle_selector)
 
-    week_in_day = int(240 / week)
+    week_in_day = int(240 / kweek)
     hold_week = int(10 * week_in_day)
-
+    analyse_week=5
     total_flow = cacl_main_cap_total(cap_data)
-    buy_point = 2
-    sell_point = -10
     data_len=len(kdata)
-    stage_days=[week_in_day*int(0.75*data_len/week_in_day)]
 
-    draw_kline(stock, cap_data, kdata,stage_days,
-               buy_point, sell_point, week,
-               hold_week, ax1, total_flow)
+    #阶段高低检测周期数
+    stage_days=[5,10,20]
+
+    if len(bs_msg)>0:
+        title_msg=bs_msg+'\n'
+    else:
+        title_msg=''
+
+
 
     # 绘制volume图
-    draw_vol(kdata, week, ax2, cap_data)
+    title_msg +=draw_vol(kdata= kdata, week=analyse_week,fig_id= ax2,cap_data= cap_data)
     # 主力资金总趋势
-    draw_cap_main(cap_data, buy_point, sell_point, week, ax3, True)
+    draw_cap_main(cap_data= cap_data, week=analyse_week,fig_id= ax3,draw_delta= True)
 
     # 绘制RSI图
     draw_rsi(kdata,ax4,rsi_low, rsi_up)
 
+    draw_kline(stock=stock,cap_data= cap_data,kdata= kdata,kweek=kweek,stage_days= stage_days,
+               bs=bs, week= analyse_week,hold_week= hold_week,ax= ax1,
+               main_flow= total_flow,title_msg=  title_msg)
+
     multi = MultiCursor(fig.canvas, (ax1, ax2, ax3,ax4), color='r', lw=1)
+
+    ax3.format_coord = format_coord3
+    ax4.format_coord = format_coord4
+
     plt.show()
 
 # 判断当前走势能否买入？
 # todo use tf model to decice the buy-sell point
-def can_buy(kdata, start, stop, week=3, rsi_low=20, rsi_up=80):
+def can_buy(kdata, ma_list=[6,12,26], week=3, rsi_low=45, rsi_up=75):
     ret = False
-    data = kdata[start:stop]
-    closing = data['close'].values
+    closing = kdata['close'].fillna(0)
 
     while not ret:
-        # RSI
-        RSI1 = talib.RSI(closing, timeperiod=5)[-week:]
+        # 均线多头发散  trends up
+        ma1 = closing.rolling(ma_list[0]).mean().tolist()[-week:]
+        if not cacl_data_trend(data=ma1,week=week):
+            break
 
-        for i in range(1, week):
-            if (RSI1[i] < rsi_low or RSI1[i] > rsi_up):
-                break
+        ma2 = closing.rolling(ma_list[1]).mean().tolist()[-week:]
+        #if not cacl_data_trend(data=ma2, week=week):
+        #    break
 
-        # MACD  bar 最新三项大于0且处于金叉后的上升阶段
-        '''
-        dif, dea, bar = talib.MACD(closing,
-            fastperiod=12, slowperiod=26, signalperiod=9)
+        ma3 = closing.rolling(ma_list[2]).mean().tolist()[-week:]
+        #if not cacl_data_trend(data=ma3, week=week):
+        #    break
 
-        bar = bar[-week:]
-        dif = dif[-week:]
-        dea = dea[-week:]
-
-        for i in range(1, week):
-            if bar[i] < bar[i - 1] \
-                    or dif[i] < dif[i - 1] \
-                    or dea[i] < dea[i - 1]:
-                break
+        if  ma1[-2] < ma1[-1]:
+            for i in range(week):
+                if not(ma1[i] >= ma2[i]):
+                    break
+        else:
+            break
 
         if i < week - 1:
             break
-        '''
 
-        # EMA 指数移动平均线  多头发散
-        ma6 = talib.EMA(closing, timeperiod=6)[-week:]
-        ma12 = talib.EMA(closing, timeperiod=12)[-week:]
-        ma26 = talib.EMA(closing, timeperiod=26)[-week:]
+        # RSI  多头且必须单调递增
+        closing = kdata['close'].fillna(0).values
+        RSI5 = talib.RSI(closing, timeperiod=5).tolist()[-week:]
+        if not cacl_data_trend(data=RSI5, week=week):  # 必须单调递增
+            break
 
-        for i in range(week):
-            if ma6[-i] < ma12[-i] \
-                    or ma12[-i] < ma26[-i]:
-                break
+        RSI10 = talib.RSI(closing, timeperiod=10).tolist()[-week:]
+        #if not cacl_data_trend(data=RSI10, week=week):  # 必须单调递增
+        #    break
+
+        RSI26 = talib.RSI(closing, timeperiod=26).tolist()[-week:]
+        #if not cacl_data_trend(data=RSI26, week=week):  # 必须单调递增
+        #    break
+
+        #long trends
+        if  RSI5[-2] < RSI5[-1] and RSI10[-2] < RSI10[-1]:
+            for i in range(1, week):
+                if  (RSI5[i]>=rsi_low and RSI5[i]<=rsi_up and RSI5[i] >= RSI10[i]) :
+                    pass
+                else:
+                    break
+
+        else:
+            break
 
         if i < week - 1:
             break
@@ -1422,6 +1531,32 @@ def can_buy(kdata, start, stop, week=3, rsi_low=20, rsi_up=80):
 
     return ret
 
+def can_sell(kdata, ma_list=[6,12,26], week=3, rsi_low=45, rsi_up=85):
+    ret = False
+    closing = kdata['close'].fillna(0)
+
+    while not ret:
+        # 均线short头发散  trends down
+        ma1 = closing.rolling(ma_list[0]).mean().tolist()[-week:]
+        #if  cacl_data_trend(data=ma1,week=week):
+        #    break
+
+        ma2 = closing.rolling(ma_list[1]).mean().tolist()[-week:]
+
+        ma3 = closing.rolling(ma_list[2]).mean().tolist()[-week:]
+        closing=closing[-week:].tolist()
+
+        #short trends or closing below ma1
+        for i in range(week):
+            if ma1[i] >= ma2[i] or closing[i]>=ma1[i]:
+                break
+
+        if i < week - 1:
+            break
+
+        ret = True
+
+    return ret
 
 def stop_loss(kdata, start, buy_point, stop):
     data = np.double(kdata[start:stop]['close'])
@@ -1435,41 +1570,6 @@ def stop_loss(kdata, start, buy_point, stop):
         ret = True
     else:
         ret = False
-
-    return ret
-
-
-# todo 利用ticks数据判断当日主力进出的强度，低位流入、高位流出
-# 确定买卖点
-def can_sell(kdata, start, buy_point, stop,
-             hold_week, week=3, rsi_low=20, rsi_up=80):
-    ret = False
-    closing = np.double(kdata[start:stop]['close'])
-    while not ret:
-        # EMA 指数移动平均线  ma6跌破ma12连续若干周期
-        ma6 = talib.EMA(closing, timeperiod=6)[-week:]
-        ma12 = talib.EMA(closing, timeperiod=12)[-week:]
-        # ma26 = talib.EMA(closing, timeperiod=26)
-
-        # 达到最大持有周期后出现连续3周低于ma6,必须清仓
-        '''
-        if stop-buy_point>hold_week :
-            for i in range(-3,0):
-                if closing[i-1]>ma6[i]:
-                    break
-
-            if i < -1:
-                break
-        '''
-
-        for i in range(week):
-            if ma6[i] > ma12[i]:
-                break
-
-        if i < week - 1:
-            break
-
-        ret = True
 
     return ret
 
@@ -1688,16 +1788,21 @@ def get_block_stock_list(stock_block):
     return get_index_stock(stock_block)
 
 #从板块组合找出股票列表，进行重复股票代码检测
-def get_stocks_form_blocks(blocks):
+# 预先选定的集合favorte_stocks
+def get_stocks_form_blocks(blocks,favorite_stocks=[]):
     stock_list=[]
+    check_favorite=len(favorite_stocks)>0
     for block in blocks:
         stocks=get_block_stock_list(block)
-        if len(stock_list)==0:
-            stock_list=stocks
-        else:
-            for stock in stocks:
-                if not stock in stock_list:
-                    stock_list.append(stock)
+
+        for stock in stocks:
+            # 不在预先选定的集合股票不做处理
+            if check_favorite:
+                if not stock[5:] in favorite_stocks:
+                    continue
+
+            if not stock in stock_list:
+                stock_list.append(stock)
 
     return  stock_list
 
@@ -1718,7 +1823,7 @@ def int2_datetime(date_int, time_int):
                              int((time_int % 10000) % 100)
                              )
 
-
+#检测文件名是否包括制定的字符串
 def check_filter(object_name, filters):
     ret = True
     for filter in filters:
@@ -1747,7 +1852,13 @@ def find_stop_trade_index(kdata, week):
 
 # todo 分析主力资金持续流入的市场表现：持续上升，先跌后升，平盘或下跌
 # todo 分析ticks数据对后续走势的影响,特别是大单进出的后续影响力
-# 累计主力资金的走势与股价未来的走势影响极大，处于下行走势的股票下跌可能性很大
+'''
+2018-05-02:
+    1）快车司机的微利策略：尾盘布局（下先手），次日跌幅大于1%坚决止损、涨幅大于3%止盈（除非持续保持盈利）
+    利用沪深主要的ETF基金进行验证。关键是选准标的进行操作。
+    2）利用主要大蓝筹进行操作
+'''
+# 累计主力资金的走势与股价未来的走势影响极大，处于下行走势的股票下跌可能性很大  ？？？
 def cacl_bs_by_cap(cap_path='\data',
                    filters=['CAP-', '015.dat'],
                    ma=[5, 10, 20], nBuyLastWeek=4, nSellLastWeek=6,
@@ -1763,7 +1874,8 @@ def cacl_bs_by_cap(cap_path='\data',
         filename = os.path.basename(file_path)
         stock = filename[4:10]
         week = int(filename[11:14])
-        if stock[0] == '6':
+
+        if stock[0] == '6' or stock[0] == '5':
             stock = 'SHSE.' + stock
         else:
             stock = 'SZSE.' + stock
@@ -1772,8 +1884,8 @@ def cacl_bs_by_cap(cap_path='\data',
         cap_len = len(cap_data)
 
         try:
-            start_dt = int2_datetime(cap_data.iloc[0, 0], cap_data.iloc[0, 1])
-            stop_dt = int2_datetime(cap_data.iloc[cap_len - 1, 0], cap_data.iloc[cap_len - 1, 1])
+            start_dt = cap_data.iloc[0, 0]
+            stop_dt = cap_data.iloc[cap_len - 1, 0]
         except:
             write_log_msg()
             continue
@@ -1783,46 +1895,37 @@ def cacl_bs_by_cap(cap_path='\data',
 
         kdata = read_kline(stock, week * 60, start_dt, stop_dt)
         klen = len(kdata)
-        ok = 0
-        nok = 0
-        total = 0
-        if cap_len != klen:
-            stop=min(cap_len,klen)-2
-            stop_dt=int2_datetime(cap_data.loc[stop,'Date'],cap_data.loc[stop,'Time'])
-            if stop_dt!=kdata.loc[stop,'eob']:
-                # todo kdata's length does not equal with cap cap_data[840-1290] [CAP-000018-005.dat]
-                # kdata     's length does not equal with cap cap_data[1167-1169] [CAP-000150-005.dat]
-                # kdata's length does not equal with cap cap_data[1281-1283] [CAP-002107-005.dat]
-                # kdata     's length does not equal with cap cap_data[1178-1180] [CAP-000622-005.dat]
-                # 此时出现局部时段停牌，但cap仍有数据，属于错误信息，必须过滤
-                print("kdata's length does not equal with cap cap_data[%d-%d] [%s]  " % (
-                    len(kdata), cap_len, filename))
-                continue
+
+        #todo 数据对齐处理  cap_data、Kdata有时会少数据，少的补充0
+        if cap_len != klen and klen>10:
+            cap1=cap_data.set_index('eob')
+            k1=kdata.set_index('eob')
+            if cap_len > klen:
+                for col in k1.columns:
+                    cap1[col]=k1[col]
+
+                #cap1=cap1.fillna(0)  #价格为0导致显示有偏移量
+                kdata = cap1[k1.columns]
+                kdata=kdata.reset_index()
             else:
-                kdata=kdata[:stop]
-                cap_data=cap_data[:stop]
-                klen=stop
-                cap_len=stop
+                for col in cap1.columns:
+                    k1[col]=cap1[col]
+
+                k1=k1.fillna(0)   #交易数据可以为0
+                cap_data= k1[cap1.columns]
+                cap_data = cap_data.reset_index()
 
         nCount = sum(ma) + nBuyLastWeek + nSellLastWeek
-        look_back_week = nCount * 3
-        i = nCount * 6
-        buy = False
-        bs = False
         week_in_day = int(240 / week)
-        hold_week = int(10 * week_in_day)
-        log_dir = '.'
 
         #view ta figure
         draw_stock_ta_fig(stock, ma, kdata, cap_data,
                               week=week, hold_week=60,
-                              rsi_low=30, rsi_up=70,
+                              rsi_low=45, rsi_up=90,
                               buy_point=0, sell_point=0, fig_count=410)
 
-
-
-        continue
-
+        '''
+        #买卖成功率统计
         while i < cap_len:
             start = i - look_back_week
             if not buy and \
@@ -1848,6 +1951,7 @@ def cacl_bs_by_cap(cap_path='\data',
                     buy = False
 
             i = i + 1
+
         if total > 0:
             print('%s,%03d,good=%.0f%%,bad=%.0f%%' % (
                 stock, week, 100 * ok / total, 100 * nok / total))
@@ -1855,16 +1959,208 @@ def cacl_bs_by_cap(cap_path='\data',
         stotal += total
         sok += ok
         snok += nok
+        '''
     if stotal > 0:
         print('total  %03d,good=%.0f%%,bad=%.0f%%' % (
             week, 100 * sok / stotal, 100 * snok / stotal))
 
     plt.close()
 
-#曲线拟合方案：一次到四次，方向判断用一次拟合方案
-def cacl_data_trend(total_flow,type=1,  week=30, show=False):
 
-    if len(total_flow)<week:
+'''
+2018-05-02:
+    1）快车司机的微利策略：尾盘布局（下先手），次日跌幅大于1%坚决止损、涨幅大于3%止盈（除非持续保持盈利）
+    利用沪深主要的ETF基金进行验证。关键是选准标的进行操作。
+        159902	中 小 板	
+        159919	300ETF	
+        159952	创业ETF	
+        510300	300ETF	
+        159915	创业板	
+        510500	500ETF	
+        510050	50ETF	
+        159949	创业板50	
+    2）利用主要ETF进行操作  ETF轮动策略
+       K线、RSI和主力资金变化均处于多头，且RSI处于安全范围【45-85】
+
+'''
+def etf_rolling(cap_path='\data',filters=['CAP-', '015.dat'],
+                   ma=[5, 10, 20], nBuyLastWeek=4, nSellLastWeek=6,
+                   rsi_low=40, rsi_up=75,backtest=False,view_ta=False):
+    etfs=['159902','159919','159952','510300','159915','510500','510050','159949']
+    etf_name=['中 小 板','300ETF' , '创业ETF','300ETF','创业板','500ETF','50ETF','创业板50']
+
+    stotal = 0
+    sok = 0
+    snok = 0
+
+    analyse_count=sum(ma)*2+nBuyLastWeek
+
+    files = get_filelist_from_path(cap_path, filters)
+
+    for file_path in files:
+        filename = os.path.basename(file_path)
+        stock = filename[4:10]
+        if stock not in etfs:
+            continue
+
+        #最多处理到日线级别的K线
+        week = int(filename[11:14])
+        if week == 0:
+            week = 240
+
+        weeks_in_trade_day=int(240/week)
+
+        if stock[0] == '6' or stock[0] == '5':
+            stock = 'SHSE.' + stock
+        else:
+            stock = 'SZSE.' + stock
+
+        cap_data = read_cap_flow(file_path)
+        cap_len = len(cap_data)
+
+        if cap_len<analyse_count:
+            continue
+
+        if backtest:
+            analyse_start=analyse_count
+        else:
+            analyse_start =cap_len-analyse_count
+
+        try:
+            start_dt = cap_data.iloc[0, 0]
+            stop_dt = cap_data.iloc[cap_len - 1, 0]
+        except:
+            write_log_msg()
+            continue
+
+        kdata = read_kline(stock, week * 60, start_dt, stop_dt)
+        klen = len(kdata)
+        if klen<analyse_count:
+            continue
+
+        # cap_data、Kdata有时会少数据，cap_data少的补充0，Kdata保持NAN
+        if cap_len != klen and klen > 10:
+            cap1 = cap_data.set_index('eob')
+            k1 = kdata.set_index('eob')
+            if cap_len > klen:
+                for col in k1.columns:
+                    cap1[col] = k1[col]
+
+                # cap1=cap1.fillna(0)  #价格为0导致显示有偏移量
+                kdata = cap1[k1.columns]
+                kdata = kdata.reset_index()
+            else:
+                for col in cap1.columns:
+                    k1[col] = cap1[col]
+
+                k1 = k1.fillna(0)  # 交易数据可以为0
+                cap_data = k1[cap1.columns]
+                cap_data = cap_data.reset_index()
+
+        buy_list=[]
+        bs=[]
+        has_buy=False
+        bs_msg=''
+        must_sell=False
+        while cap_len-analyse_start>1:
+            analyse_start += 1
+
+            if len(buy_list)>0:
+                #sell poit detect
+                try:
+                    if must_sell or  can_sell(kdata=kdata[:analyse_start], \
+                                ma_list=ma, week=nBuyLastWeek, rsi_low=rsi_low, rsi_up=rsi_up):
+                        must_sell=True
+                        tmp=buy_list.copy()
+                        for buy_point in tmp:
+                            if kdata.loc[analyse_start-1, 'eob'].date()==kdata.loc[buy_point, 'eob'].date():
+                                continue
+
+                            if view_ta:
+                                bs_tmp=("[%s,%0.3f]-[%s,%0.3f]" % (\
+                                       kdata.loc[buy_point, 'eob'].strftime('%Y-%m-%d %H-%M-%S'),kdata.loc[buy_point, 'close'],
+                                       kdata.loc[analyse_start-1, 'eob'].strftime('%Y-%m-%d %H-%M-%S'),kdata.loc[analyse_start-1, 'close']
+                                                           ))
+                                print("    =====sell:%s" % bs_tmp)
+                                bs_msg+=bs_tmp
+
+                            bs.append((analyse_start-1,buy_point))
+                            buy_list.__delitem__(buy_list.index(buy_point))
+
+                except:
+                    write_log_msg()
+                    pass
+
+            #if not main_delta_cap_up(data=cap_data[:analyse_start],\
+            #  maList=ma,nLastWeeks=nBuyLastWeek):
+            #    continue
+
+            if not can_buy(kdata=kdata[:analyse_start],
+              ma_list=ma,week=nBuyLastWeek,rsi_low=rsi_low,rsi_up=rsi_up):
+                continue
+
+            must_sell=False
+            buy_list.append(analyse_start-1)
+            if not has_buy:
+                print('\n ------------------%s----------------------' % filename)
+                has_buy=True
+                
+            #print("code:%s,%s,buy"%\
+            #      (filename,kdata.loc[analyse_start,'eob'].strftime('%Y-%m-%d %H-%M-%S')))
+
+        if len(buy_list)>0:
+            for buy_point in buy_list:
+                bs.append((analyse_start, buy_point))
+                if view_ta:
+                    bs_tmp = (" [%s,%0.3f]-[%s,%0.3f]" % ( \
+                        kdata.loc[buy_point, 'eob'].date(), kdata.loc[buy_point, 'close'],
+                        kdata.loc[analyse_start, 'eob'].date(), kdata.loc[analyse_start, 'close']
+                    ))
+                    bs_msg+=bs_tmp
+                    print("    =====holding:%s" % bs_tmp)
+
+        #view ta figure
+        if len(bs)>0 and view_ta:
+            draw_stock_ta_fig(stock, ma, kdata, cap_data,
+                              kweek =week, hold_week=60,
+                              rsi_low = rsi_low, rsi_up=rsi_up,
+                              bs =bs,  fig_count=410,bs_msg=bs_msg)
+
+        #'''
+        #买卖成功率统计
+        ok = 0
+        nok = 0
+        total=0
+        for sell,buy in bs:
+            reward = kdata.loc[sell, 'close'] / kdata.loc[buy, 'close']
+
+            if reward >= 1.006:
+                ok += 1
+            else:
+                nok += 1
+
+            total += 1
+
+        if total > 0:
+            print('%s,%03d,good=%.0f%%,bad=%.0f%%' % (
+                stock, week, 100 * ok / total, 100 * nok / total))
+
+        stotal += total
+        sok += ok
+        snok += nok
+        #'''
+
+    if stotal > 0:
+        print('total  %03d,good=%.0f%%,bad=%.0f%%' % (
+            week, 100 * sok / stotal, 100 * snok / stotal))
+
+    plt.close()
+
+
+#曲线拟合方案：一次到四次，方向判断用一次拟合方案
+def cacl_data_trend(data,type=1, week=30, show=False):
+
+    if len(data)<week:
         return
 
     # 基本曲线拟合模型 线性（一次）、二次、三次、四次
@@ -1968,23 +2264,23 @@ def cacl_data_trend(total_flow,type=1,  week=30, show=False):
             #               增减，减增  趋势可能转变
         return trends
 
-    def regression1(datas, show):
-        cap_len = len(datas)
-        x2 = range(cap_len)
+    def line_regression(datas):
+        x2 = range(week)
+        A1, B1 = optimize.curve_fit(f1, x2, datas[-week:])[0]
 
-        A1, B1 = optimize.curve_fit(f1, x2, datas)[0]
-
-        x2 = x2[-week - 1:]
         y2 = fnx(x2, [A1, B1])
 
         #通过起始值判断趋势：升或跌
         return  y2[-1]>y2[0]
 
-    if type==1:
-        return  regression1(total_flow,show)
-    else:
+    try:
+        if type==1:
+            return  line_regression(data)
+        else:
+            return False
+    except:
+        write_log_msg()
         return False
-
 #todo 基于移动平均的局部主力资金流的变化情况分析、判断波段介入时机
 
 

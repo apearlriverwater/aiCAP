@@ -143,6 +143,77 @@ mystock_botton_menu=[
     ['hot',387,519]
 ]
 
+'''
+    均线多头向上判断：多头向上时返回true，否则false
+        dataList 待计算数据
+        maList 周期序列列表，最少三个周期,
+        nLastWeeks最少程序周期数
+        均线单调递增、多头排列
+'''
+def close_ma_up(closing, maList, nLastWeeks):
+    bRet = True
+    ma = []
+    CaclCount = sum(maList) * 2 + nLastWeeks
+    count = len(closing)
+
+    if count >= CaclCount:
+        for week in maList:
+            tmp = (closing.rolling(week).mean()[-nLastWeeks:])
+            if tmp.tolist()!=tmp.sort_values(0, True).tolist():  # 必须单调递增
+                bRet = False
+                break
+            else:
+                index = maList.index(week)
+                if index > 0 and index < count:
+                    # 多头检测 小周期均线值大于大周期均线值
+                    diff = ma - tmp
+                    diff = diff[diff >= 0]
+                    if diff.count() < nLastWeeks:
+                        bRet = False
+                        break
+
+                ma = tmp.copy()
+    else:
+        bRet = False
+
+
+    return bRet
+
+
+'''
+    均线多头向下判断：多头向下时返回true，否则false
+        dataList 待计算数据
+        maList 周期序列列表，最少三个周期,
+        nLastWeeks最少程序周期数
+        单调递减、空头排列
+'''
+def close_ma_down(closing, maList, nLastWeeks):
+    bRet = True
+    CaclCount = sum(maList) * 2 + nLastWeeks
+    count = len(closing)
+    if count>=CaclCount:
+        for week in maList:
+            tmp = (closing.rolling(week).mean()[-nLastWeeks:])
+
+            if tmp.tolist()!=tmp.sort_values(0, False).tolist():  # 必须单调递减
+                bRet = False
+                break
+            else:
+                index = maList.index(week)
+                if index > 0 and index < count:
+                    # 空头检测 小周期均线值小于大周期均线值
+                    diff = ma - tmp
+                    diff = diff[diff <=0]
+                    if diff.count() < nLastWeeks:
+                        bRet = False
+                        break
+
+                ma = tmp.copy()
+    else:
+        bRet = False
+
+    return bRet
+
 #自动向自选股添加需要的标的
 def add_stock_2_mystock(group_name,stock_list):
     found = False
@@ -598,21 +669,23 @@ def export_mystock2_real_status():
 
     return  export_dfcf_data(click_points,key_list)
 
+'''
+   获取自选股实时状态
+   自选股序列可扩充，目前支持7种
+'''
 def export_mystock_real_status(index=0):
-    if index==0:
-        click_points=[
-            [dfcf_menu_points,'自选股'],
-            [mystock_botton_menu, '自选股'],
-            [hs_rank_top_menu, '行情列表'],
-            [204, 312]
-        ]
-    else:
-        click_points = [
-            [dfcf_menu_points, '自选股'],
-            [mystock_botton_menu, 'qsz2'],
-            [hs_rank_top_menu, '行情列表'],
-            [204, 312]
-        ]
+    mystock_list=['自选股','qsz2','1buy','2buy','paz','pabuy','hot']
+
+    if index>=len(mystock_list):
+        return
+
+    click_points=[
+        [dfcf_menu_points,'自选股'],
+        [mystock_botton_menu, mystock_list[index]],
+        [hs_rank_top_menu, '行情列表'],
+        [204, 312]
+    ]
+
 
     key_list = [
         ['down', 12],
@@ -784,6 +857,9 @@ def read_real_period_static(all_stock=True,mystock=0):
     #按字段进行排序
     return period_static
 
+#初始	代码	名称	最新	涨幅%	涨跌	总手	现手	买入价	卖出价	涨速%	换手%	金额	市盈率
+#所属行业	最高	最低	开盘	昨收	振幅%	量比	委比%	委差	均价	内盘	外盘	内外比	买一量	卖一量
+#市净率	总股本	总市值	流通股本	流通市值	3日涨幅%	6日涨幅%	3日换手%	6日换手%
 def read_real_status(all_stock=True,mystock=0):
     if all_stock:
         real_status = export_allstock_real_status()  # export_mystock_real_status()  #      export_real_capflow()
@@ -800,7 +876,7 @@ def read_real_status(all_stock=True,mystock=0):
     non_values = [u'代码', u'名称', u' 所属行业']
     real_status = format_dfcf_export_text(real_status, '', non_values)
 
-    print(real_status.loc[:2])
+    return (real_status)
 
 def read_real_add_holding(all_stock=True,botton_menu='沪深A股'):
     if all_stock:
@@ -847,6 +923,28 @@ def read_real_capflow():
 
 
 '''
+    基于pe等参数选取当前满足特定参数的标的，参数为列表[low,high]
+    市盈率pe
+    市净率
+    总股本
+    总市值
+    流通股本
+    流通市值
+    3日、6日涨幅%、换手%
+'''
+def get_all_stock_in_sh_sz_by_params(pe=[5,80]):
+    col = '市盈率'
+    need_cols = [col,'代码']
+    stocks=read_real_status(all_stock=True)[need_cols]
+
+    #按市盈率从小到大排序
+    stocks=stocks.sort_values(by=col)
+    stocks = stocks[stocks[col]>=pe[0] ]
+    stocks = stocks[stocks[col] <= pe[1]]
+    return stocks['代码'].values
+    pass
+
+'''
     多头选股：低位起涨  1 buy
             条件与：15日内创30日新低，10日内连续缩量，
                 条件或：5日内温和上涨，10日内间歇放量，5日内突然放量
@@ -855,13 +953,15 @@ def read_real_capflow():
                 中证700 SHSE.000906，  沪深300 SHSE.000300
     '''
 def get_stock_1buy(block='SHSE.000906',
-    week_in_seconds=4 * 60 * 60,count=40,stocks=''):
+    week_in_seconds=4 * 60 * 60,weeks=[5,10,20],stocks=''):
         if stocks=='':
             stock_list = gmTools.get_block_stock_list(block)
         else:
             stock_list=stocks
 
         stock_long=[]
+        nLastWeeks=3
+        count=sum(weeks)*2+nLastWeeks*2
 
         for stock in stock_list:
             bars = gmTools.read_last_n_kline(stock, week_in_seconds,count)
@@ -869,8 +969,9 @@ def get_stock_1buy(block='SHSE.000906',
             if bars is None:
                 continue
 
-
             closing=bars['close']
+            if not close_ma_up(closing=closing, maList=weeks, nLastWeeks=nLastWeeks):
+                continue
 
             # 15日内创30日新低
             vol_count = int(count/2)
@@ -911,12 +1012,14 @@ def get_stock_1buy(block='SHSE.000906',
 
 #中期起涨  更常见的起涨模式  2buy
 def get_stock_2buy(block='SHSE.000906',
-    week_in_seconds=4 * 60 * 60,count=20,stocks=''):
+    week_in_seconds=4 * 60 * 60,weeks=[5,10,20],stocks=''):
     if stocks=='':
         stock_list = gmTools.get_block_stock_list(block)
     else:
         stock_list=stocks
 
+    nLastWeeks = 3
+    count = sum(weeks) * 2 + nLastWeeks * 2
     stock_long = []
     for stock in stock_list:
         bars = gmTools.read_last_n_kline(stock, week_in_seconds, count)
@@ -924,7 +1027,9 @@ def get_stock_2buy(block='SHSE.000906',
         if bars is None or len(bars)<count:
             continue
 
-        closing = bars['close'][-count:]
+        closing = bars['close']
+        if not close_ma_up(closing=closing,maList=weeks,nLastWeeks=nLastWeeks):
+            continue
 
         # 最近交易日创阶段放量新高
         if closing.idxmax() != len(closing)-1:
@@ -985,6 +1090,49 @@ def check_washing(kdata,week=5):
             write_log_msg()
             pass
     return  washing_index
+
+#检查标的目前是否处于多头状态
+def get_stock_long(stock_list,
+    week_in_seconds=4 * 60 * 60,weeks=[5,10,20]):
+
+    now = datetime.datetime.now()
+    stock_long = []
+    count=sum(weeks)*2
+
+    for stock in stock_list:
+        bars = gmTools.read_last_n_kline(stock, week_in_seconds, count+10)
+
+        if bars is None:
+            continue
+
+        wash_index=check_washing(bars,week=count)
+
+        if len(wash_index)==0:
+            continue
+
+        print(stock[5:])
+
+        if cacl_reward:
+            #评估搓揉线的操作价值
+            # 以搓揉线后的第二日开盘价买入，3日后以收盘价卖出的收益
+            for washing_index in wash_index:
+                if washing_index+4<count+10:
+                    try:
+                        reward2=int(bars.loc[washing_index+2,'close']/bars.loc[washing_index+1,'open']*100)-100
+                        reward5 = int(bars.loc[washing_index + 5, 'close'] / bars.loc[washing_index + 1, 'open'] * 100) - 100
+                        reward15 = int(bars.loc[washing_index + 15, 'close'] / bars.loc[washing_index + 1, 'open'] * 100) - 100
+                        f.write("%s,%s,2:%s,5:%s,15:%s\n"%(stock[5:],
+                            bars.loc[washing_index+1,'eob'].date(),reward2,reward5,reward15))
+
+                    except:
+                        break
+
+        # 满足可介入条件
+        stock_long.append(stock[5:])
+
+    f.close()
+    print('stock washing count: %d' % len(stock_long))
+    return stock_long
 
 
 #检查特定板块或全部关注标的最近5个交易日是否存在洗盘情况
@@ -1121,7 +1269,7 @@ def read_save_mystock_real_addholding(mystock_holding,botton_menu='自选股',
         tmp = read_real_add_holding(all_stock=is_all_stocks, botton_menu=botton_menu)[save_col]
         mystock_holding = pd.concat([mystock_holding, tmp], ignore_index=True)
 
-    #todo 考虑利用1、3、5、10日的涨幅判断当前走势是否具备介入机会
+
     #最近 1、2、2、5日走势
     if check_buy:
         all_count=0
@@ -1134,6 +1282,7 @@ def read_save_mystock_real_addholding(mystock_holding,botton_menu='自选股',
 
             if get_stock_1buy('', stocks=[stock]) \
                     or get_stock_2buy('', stocks=[stock]):
+                # todo 考虑利用1、3、5、10日的涨幅判断当前走势是否具备介入机会
                 stocks.append(stock[5:])
                 all_count += 1
                 if all_count >= 10:
@@ -1152,7 +1301,7 @@ def read_save_mystock_real_addholding(mystock_holding,botton_menu='自选股',
     if is_send_mail:
             send_mail("市场动态", msg=mail_conten)
             mail_conten=''
-            print('send msg to user')
+            print(' [%s] send msg to user'%(now.time()))
 
 
     return  mystock_holding
@@ -1183,11 +1332,15 @@ def send_mail(title,msg):
 #交易日循环
 def trade_date_loop():
     load_dfcf()
+    favorite_stocks=get_all_stock_in_sh_sz_by_params()
+    favorite_stocks.sort()   #按代码排序，便于后续使用,6位数字符串
+
     mystock_holding = None
     buy1_holding = None
     buy2_holding = None
     pabuy_holding = None
     allstock_holding = None
+
     count = 0
     last_eob=0
     next_trade_datetime=str(datetime.datetime.now().date())  #下一交易日
@@ -1215,25 +1368,30 @@ def trade_date_loop():
 
                 # 初始化当日可选标的列表
                 stock_list_need_init = False
-                tmp = gmTools.get_stocks_form_blocks(FAVORTE_BLOCKS)
+                tmp = gmTools.get_stocks_form_blocks(FAVORTE_BLOCKS,favorite_stocks=favorite_stocks)
+
                 print(str(now) + ' caculate washing')
                 add_stock_2_mystock('hot', get_stock_1buy(block='', stocks=tmp))
 
+                now = datetime.datetime.now()
                 print(str(now)+' caculate 1buy')
                 add_stock_2_mystock('1buy', get_stock_1buy(block='', stocks=tmp))
-                print(str(now)+' caculate 1buy')
+                
+                now = datetime.datetime.now()
+                print(str(now)+' caculate 2buy')
                 add_stock_2_mystock('2buy', get_stock_2buy(block='', stocks=tmp))
 
             f.close()
             stock_list_need_init = False
         #'''
-        if  False:# int_time>1520 or now.hour<9 :
+        if  int_time>1520 or now.hour<9 :
             mystock_holding=None
             buy1_holding=None
             buy2_holding = None
             pabuy_holding = None
             allstock_holding=None
-
+            now = datetime.datetime.now()
+            print(str(now)+' waiting to trade\n')
             time.sleep(5 * 60)
             continue
         #'''
@@ -1278,7 +1436,7 @@ def trade_date_loop():
                                     is_all_stocks=True,check_buy=True,is_send_mail=True)
             data_change=True
 
-            if count %5==0:
+            if count %5==0 or int_time>1520:
                 writer = pd.ExcelWriter('沪深A股' + str(now.date()) + '.xlsx')
                 allstock_holding.to_excel(writer, '沪深A股')
                 writer.save()
@@ -1309,13 +1467,25 @@ def check_washing_in_sh_sz_2_hot():
         week_in_seconds=4 * 60 * 60,count=30,cacl_reward=True) )
 
 if __name__ == '__main__':
-
-
     trade_date_loop()
+
+
     pass
 
     '''
-     check_washing_in_sh_sz_2_hot()
+    a=pd.Series([i for i in range(100)])
+    close_ma_up(a,[5,10,20],5)
+    close_ma_down(a, [5, 10, 20], 5)
+
+    a = pd.Series([50-i for i in range(100)])
+    close_ma_up(a, [5, 10, 20], 5)
+    close_ma_down(a, [5, 10, 20], 5)
+    
+    
+    stocks=get_all_stock_in_sh_sz_by_params([5,60])
+    print(stocks[:5])
+    trade_date_loop()
+    check_washing_in_sh_sz_2_hot()
     load_dfcf_stock_2_mystock()
     load_dfcf_stock_2_mystock()
     add_stock_2_mystock('pabuy', add_pazq_stock_2_mystock())
