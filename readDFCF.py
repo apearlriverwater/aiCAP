@@ -1,13 +1,59 @@
 # -*- coding: utf-8 -*-
 
 '''
-  1、操作dfcf界面的控制程序，自动控制软件启动、登录、功能项选择等
+  1、操作dfcf界面的控制程序，自动控制软件启动、登录、功能项选择等行情
+  东方财富PC客户端可提供的数据：
+  1.1 沪深个股和自选股的实时信息
+    行情列表：当前实时行情快照信息
+    增仓排名：当日、3日、5日、10日主力资金增仓排名情况
+    资金流向：最新价、涨幅，主力净流入，集合竞价成交金额（深市不准），实时超大单、大单、中单和小单数据
+    DDE决策：最新价、涨幅，当日资金流，5、10日资金流，DDX飘红天数，实时超大单、大单、中单和小单买卖占比
+    财务数据：个股详细的财务数据，包括：更新日期	总股本	流通A股	人均持股数	每股收益	每股净资产
+            加权净资产收益率	营业总收入	营业总收入同比	营业利润	投资收益	利润总额	归属净利润
+            归属净利润同比	未分配利润	每股未分配利润	销售毛利率	总资产	流动资产	固定资产
+            无形资产	总负债	流动负债	长期负债	资产负债比率	股东权益	股东权益比	公积金
+            每股公积金	流通B股	H股	上市日期
+    阶段统计：唯一可自定义感兴趣信息的类型，包括：最新价、涨幅，换手、总手，5、10、20日涨幅、换手率和
+            跑赢大盘天数。需下载最新数据。除资金流、DDE和增仓排名等L2数据外，均可在此处自定义需要的数据。
+            利用阶段统计数据可粗略判断标的当前走势。
+
+    盈利预测：机构研究报告中心，数据准确度一般，暂时不关注
+    多股同列：实时人工看盘使用。
+
+  1.2 大户室数据
+  1.2.1 顶级挂单
+      包括挂单时间、价格与总数、总金额，附带数据包括市盈率、换手率等参数。考虑用于短线操作。
+
+  1.2.2 拖拉机单
+       待研究数据用途
+
+  1.2.3 强势狙击
+
+  1.2.4 主力踪迹
+
+  1.2.5 L2核心内参
+
+  1.2.6 资金全景
+        与资金流向相同
+
+  1.2.7 DDE全景
+    DDE决策
+  1.2.8 风云全景
+     一致预期的标的，数据不能导出，未考虑好使用。
+
+  1.3 沪深指数
+      可方便导出主要市场参数。
+      可导出全球主要指数。
+  1.4 沪深板块
+
+  1.5 数据中心
+     大量数据，待挖掘使用。
   2、在交易日定期利用数据导出功能把数据导出到剪辑板或者文件再进行处理
   2.1 导出大盘指数情况
     未实现。
     可利用掘金的数据订阅功能实现数据收集。
 
-  2.2 全市场涨跌情况
+  2.2 全市场涨跌情况：全市场快照，自定义标的快照
       通过资金流获得，方便统计涨跌情况、资金流入情况。
       未实现。
 
@@ -47,16 +93,15 @@
 
 '''
 import pyautogui
-
 import subprocess
 import win32gui, win32api, win32con  #module name pywin32
 import win32clipboard as clipboard
 import datetime,time,re
 import pandas as pd
-import os
-import numpy as np
+import os,stat
+#import numpy as np
 import gmTools
-
+#import infWECHAT as wechat
 
 '''
 -----------掘金主要指数--------------------------------
@@ -87,8 +132,11 @@ STOCK_BLOCK = 'SHSE.000906'
 FAVORTE_BLOCKS=['SHSE.000009','SHSE.000016','SHSE.000097','SHSE.000300',
                 'SHSE.000838','SZSE.399008','SZSE.399012','SZSE.399013','SZSE.399673']
 
-dfcf_main_file = "c:\\eastmoney\\swc8\\mainfree.exe"
-dfcf_menu_points=[
+dfcf_main_file = ["c:\\eastmoney\\swc8\\mainfree.exe",  "E:\\02soft\\99eastmoney\\swc8\\mainfree.exe"]
+
+mystock_list = ['自选股', 'qsz2', '1buy', '2buy', 'paz', 'pabuy', 'hot', 'etf']
+
+dfcf_top_menu_points=[
     ['首页',28,44],
     ['全景图',108,44],
     ['自选股',188,44],
@@ -97,6 +145,27 @@ dfcf_menu_points=[
     ['沪深排行',266,44],
     ['板块检测',332,44],
     ['沪深指数',394,44]
+]
+
+dfcf_left_menu_points=[
+    ['全景图',40,69],
+    ['自选股',40,99],
+    ['沪深个股',40,127],
+    ['沪深板块',40,157],
+    ['沪深指数',40,187],
+    ['资讯中心',40,221],
+    ['数据中心',40,249],
+    ['L2大户室',40,339],
+    ['股指期货',40,369],
+    ['期权市场',40,399],
+    ['全球指数',40,429],
+    ['港股市场',40,459],
+    ['美股市场',40,489],
+    ['期货现货',40,519],
+    ['基金债券',40,549],
+    ['外汇市场',40,579],
+    ['炒股大赛',40,609],
+    ['委托交易',40,639]
 ]
 
 #设置自选股主要操作
@@ -140,8 +209,59 @@ mystock_botton_menu=[
     ['2buy',266,519],
     ['pazq',308,519],
     ['pabuy',345,519],
-    ['hot',387,519]
+    ['hot',387,519],
+    ['etf',432,519]
 ]
+
+# no operate ,only for delay
+no_operate=[
+    ['nop',270,150]
+]
+#L2Room
+L2Room_top_menu=[
+    ['顶级挂单',127,62],
+    ['拖拉机单',196,62],
+    ['强势狙击',266,62],
+    ['主力踪迹',329,62],
+    ['L2核心内参',400,62],
+    ['资金全景',476,62],
+    ['DDE全景',546,62]
+]
+
+#true file exist ,false file not exist
+def file_exist(file_path):
+    try:
+        os.stat(file_path)
+        return True
+    except:
+        return False
+
+#保存文件，title=True时若文件不存在把第一行作为title否则丢弃第一行
+def write_text_file(file_path,msg,title=''):
+
+    def write_list(f,msg):
+        for line in  msg:
+            f.write(str(line))
+            #print(str(line))
+            f.write('\n')
+
+    #----------------------------------------------------------
+    try:
+        if file_exist(file_path=file_path):
+            f = open(file_path, "a")
+            write_list(f,msg)
+            f.close()
+        else:
+            f = open(file_path, "wt")
+            if title!='':
+                f.write(str(title))
+                f.write('\n')
+
+            write_list(f,msg)
+            f.close()
+
+    except:
+        write_log_msg()
 
 '''
     均线多头向上判断：多头向上时返回true，否则false
@@ -175,7 +295,6 @@ def close_ma_up(closing, maList, nLastWeeks):
                 ma = tmp.copy()
     else:
         bRet = False
-
 
     return bRet
 
@@ -216,62 +335,68 @@ def close_ma_down(closing, maList, nLastWeeks):
 
 #自动向自选股添加需要的标的
 def add_stock_2_mystock(group_name,stock_list):
-    found = False
-    for item in dfcf_menu_points:
-        if '工具' == item[0]:
-            pyautogui.click(item[1], item[2])
-            key_list=[['down', 1],['enter', 1]]
+    try:
+        if len(stock_list)==0:
+            return
+
+        found = False
+        for item in dfcf_top_menu_points:
+            if '工具' == item[0]:
+                pyautogui.click(item[1], item[2])
+                key_list=[['down', 1],['enter', 1]]
+                press_keys(key_list)
+                found = True
+                break
+
+        if found == False:
+            return
+
+        found=False
+        for item in setup_my_stock_ui_item:
+            if group_name==item[0]:
+                pyautogui.click(item[1],item[2])
+                found=True
+                break
+
+        if found==False:
+            return
+
+        found = False
+        for item in setup_my_stock_ui_item:
+            if 'clearstock' == item[0]:
+                time.sleep(0.1)
+                pyautogui.click(item[1], item[2])
+                found = True
+                time.sleep(0.1)
+
+                #清空自选股
+                hwnd_dfcf = win32gui.FindWindow(None, '清空自选股')
+                if hwnd_dfcf > 0:
+                    press_keys([['enter', 1]])
+
+                time.sleep(0.1)
+                break
+
+        if found == False:
+            return
+
+        for stock in stock_list:
+            key_list = [[char, 1] for char in stock]
+            key_list.append(['enter', 1])
             press_keys(key_list)
-            found = True
-            break
-
-    if found == False:
-        return
-
-    found=False
-    for item in setup_my_stock_ui_item:
-        if group_name==item[0]:
-            pyautogui.click(item[1],item[2])
-            found=True
-            break
-
-    if found==False:
-        return
-
-    found = False
-    for item in setup_my_stock_ui_item:
-        if 'clearstock' == item[0]:
-            time.sleep(0.1)
-            pyautogui.click(item[1], item[2])
-            found = True
             time.sleep(0.1)
 
-            #清空自选股
-            hwnd_dfcf = win32gui.FindWindow(None, '清空自选股')
-            if hwnd_dfcf > 0:
-                press_keys([['enter', 1]])
-
-            time.sleep(0.1)
-            break
-
-    if found == False:
-        return
-
-    for stock in stock_list:
-        key_list = [[char, 1] for char in stock]
-        key_list.append(['enter', 1])
-        press_keys(key_list)
-        time.sleep(0.2)
-
-    for item in setup_my_stock_ui_item:
-        if 'exit' == item[0]:
-            pyautogui.click(item[1], item[2])
-            break
+        for item in setup_my_stock_ui_item:
+            if 'exit' == item[0]:
+                pyautogui.click(item[1], item[2])
+                break
+    except:
+        write_log_msg()
 
 def write_log_msg():
     import traceback
     now = datetime.datetime.now()
-    f = open("errorlog.txt", "a")
+    f = open("errorlog.txt", "a+")
     f.write('\n'+str(now)+'\n')
     f.write(traceback.format_exc())
     f.close()
@@ -318,14 +443,17 @@ class cWindow:
                     # it would disappear from the Task Bar as well.
                     win32gui.ShowWindow(hwnd, win32con.SW_FORCEMINIMIZE)
 
-def click_dfcf_menu(menu_points=dfcf_menu_points,menu_name='首页'):
-    for item in menu_points:
-        if menu_name==item[0]:
-            pyautogui.click(item[1],item[2])
-            time.sleep(0.2)
-            return  True
+def click_dfcf_menu(menu_points=dfcf_top_menu_points,menu_name='首页'):
+    try:
+        for item in menu_points:
+            if menu_name==item[0]:
+                pyautogui.click(item[1],item[2])
+                time.sleep(0.1)
+                return  True
 
-    return  False
+        return  False
+    except:
+        pass
 
 def show_dfcf():
     time.sleep(0.5)
@@ -336,7 +464,7 @@ def show_dfcf():
         cW.Maximize()
         cW.SetAsForegroundWindow()
         #点击首页
-        click_dfcf_menu(menu_points=dfcf_menu_points, menu_name='首页')
+        click_dfcf_menu(menu_points=dfcf_top_menu_points, menu_name='首页')
     except:
         write_log_msg()
 
@@ -374,14 +502,51 @@ def  close_export_window():
 def  close_welcome():
     return close_window(caption="东方财富    [按Esc关闭本窗口]")
 
+#自动登录gmzyj2590@1109
+def login_gm():
+    key_list = [['z', 1], ['y', 1], ['j', 1],['2', 1], ['5', 1], ['9', 1],['0', 1],\
+                ['@', 1], ['1', 1], ['1', 1], ['0', 1],['9', 1]]
+    try:
+        pyautogui.click(610,465)
+        press_keys(key_list)
+        pyautogui.click(685,530)
+        return True
+    except:
+        return  False
 
-def openDFCF(file=dfcf_main_file):
+def openGM(file="C:\Program Files\掘金量化终端\goldminer3.exe"):
     prs = subprocess.Popen([file])
+    #等待欢迎提示窗体，出现后关闭它
+    # 找不到应用自行弹出的窗口，无法点击它
+    waiting=6
+    count=2
+    time.sleep(8)
+    while waiting>0:
+        time.sleep(count)
+        if login_gm():
+            break
+
+        waiting-=count
+
+    time.sleep(15)
+
+
+def openDFCF(files=dfcf_main_file):
+    found=False
+    for file in files:
+        if file_exist(file):
+            prs = subprocess.Popen([file])
+            found=True
+            break
+
+    if not found:
+        print("dfcf open error!!!")
+        return
 
     #等待欢迎提示窗体，出现后关闭它，最长等待35秒
     # 找不到应用自行弹出的窗口，无法点击它
     waiting=60
-    while waiting>0:
+    while  waiting>0:
         time.sleep(2)
         if close_welcome():
             break
@@ -389,7 +554,6 @@ def openDFCF(file=dfcf_main_file):
         waiting-=3
 
     time.sleep(3)
-
 
     '''
     win32gui.ShowWindow(hwnd_dfcf, win32con.SW_MAXIMIZE)
@@ -434,13 +598,14 @@ def press_keys(key_list):
 #模拟人工操作的方式导出东方财富数据
 def export_dfcf_data(click_points,key_list):
     ret=''
-    #try:
-    #click_fig("dfcfMenu\\cap_flow.png")
-    #time.sleep(2)
-    if True: #click_fig("dfcfMenu\\l2_cap_flow.png", 85):
+
+    try:
         set_text_2_clipboard()
         for point in click_points[:-1]:
-            click_dfcf_menu(point[0],point[1])
+            if point[0]=='delay':
+                time.sleep(point[1])
+            else:
+                click_dfcf_menu(point[0],point[1])
 
         #popup menu
         pyautogui.rightClick(click_points[-1])
@@ -449,257 +614,18 @@ def export_dfcf_data(click_points,key_list):
         for key in key_list:
             for _ in range(key[1]):
                 pyautogui.keyDown(key[0])
+                time.sleep(0.05)
                 pyautogui.keyUp(key[0])
+                time.sleep(0.1)
 
         close_export_window()
 
         #todo 二进制格式的文本待解析
         ret=get_text_from_clipboard()
-
-    #except:
-    #    write_log_msg()
-    #    ret=None
+    except:
+        pass
+    
     return  ret
-
-#模拟人工操作的方式导出all实时资金流
-def export_allstock_real_capflow():
-    click_points=[
-        [dfcf_menu_points,'沪深排行'],
-        [hs_rank_top_menu, '资金流向'],
-        [hs_rank_botton_menu, '沪深A股'],
-        [273, 307]
-    ]
-    key_list = [
-        ['down', 7],
-        ['right', 1],
-        ['enter', 1],
-        ['tab', 4],
-        ['up', 3],
-        ['tab', 1],
-        ['enter', 2]
-    ]
-
-    return  export_dfcf_data(click_points,key_list)
-
-
-def export_allstock_real_status():
-    click_points=[
-        [dfcf_menu_points,'沪深排行'],    #沪深排行
-        [hs_rank_botton_menu, '沪深A股'],  #沪深A股
-        [hs_rank_top_menu, '行情列表'],
-        [204, 312]   #呼出右键菜单
-    ]
-    key_list = [
-        ['down', 7],
-        ['right', 1],
-        ['enter', 1],
-        ['tab', 4],
-        ['up', 3],
-        ['tab', 1],
-        ['enter', 2]
-    ]
-
-    return  export_dfcf_data(click_points,key_list)
-
-def export_allstock_period_statics():
-    click_points=[
-        [dfcf_menu_points,'沪深排行'],    #沪深排行
-        [hs_rank_botton_menu, '沪深A股'],  #沪深A股
-        [hs_rank_top_menu, '阶段统计'],
-        [204, 312]   #呼出右键菜单
-    ]
-    key_list = [
-        ['down', 7],
-        ['right', 1],
-        ['enter', 1],
-        ['tab', 4],
-        ['up', 3],
-        ['tab', 1],
-        ['enter', 2]
-    ]
-
-    return  export_dfcf_data(click_points,key_list)
-
-def export_mystock_period_statics(index=0):
-    if index==0:
-        click_points=[
-            [dfcf_menu_points,'自选股'],    #沪深排行
-            [mystock_botton_menu, '自选股'],
-            [hs_rank_top_menu, '阶段统计'],
-            [204, 312]   #呼出右键菜单
-        ]
-    else:
-        click_points = [
-            [dfcf_menu_points, '自选股'],  # 沪深排行
-            [mystock_botton_menu, 'qsz2'],
-            [hs_rank_top_menu, '阶段统计'],
-            [204, 312]  # 呼出右键菜单
-        ]
-
-    key_list = [
-        ['down', 8],
-        ['right', 1],
-        ['enter', 1],
-        ['tab', 4],
-        ['up', 3],
-        ['tab', 1],
-        ['enter', 2]
-    ]
-
-    return  export_dfcf_data(click_points,key_list)
-
-#实时加仓数据  增仓排名
-def export_allstock_real_add_holding():
-    click_points=[
-        [dfcf_menu_points,'沪深排行'],    #沪深排行
-        [hs_rank_botton_menu, '沪深A股'],
-        [hs_rank_top_menu, '增仓排名'],   #增仓排名
-        [204, 312]   #呼出右键菜单
-    ]
-    key_list = [
-        ['down', 7],
-        ['right', 1],
-        ['enter', 1],
-        ['tab', 4],
-        ['up', 3],
-        ['tab', 1],
-        ['enter', 2]
-    ]
-
-    return  export_dfcf_data(click_points,key_list)
-
-
-#实时加仓数据  增仓排名
-def export_allstock_real_add_holding(botton_menu='沪深A股'):
-    click_points=[
-        [dfcf_menu_points,'沪深排行'],    #沪深排行
-        [hs_rank_botton_menu, botton_menu],
-        [hs_rank_top_menu, '增仓排名'],   #增仓排名
-        [204, 312]   #呼出右键菜单
-    ]
-    key_list = [
-        ['down', 7],
-        ['right', 1],
-        ['enter', 1],
-        ['tab', 4],
-        ['up', 3],
-        ['tab', 1],
-        ['enter', 2]
-    ]
-
-    return  export_dfcf_data(click_points,key_list)
-
-
-def export_mystock_real_add_holding(botton_menu='自选股'):
-    click_points = [
-        [dfcf_menu_points, '自选股'],  # 沪深排行
-        [mystock_botton_menu, botton_menu],
-        [hs_rank_top_menu, '增仓排名'],  # 增仓排名
-        [204, 312]  # 呼出右键菜单
-    ]
-
-    key_list = [
-        ['down', 12],
-        ['right', 1],
-        ['enter', 1],
-        ['tab', 4],
-        ['up', 3],
-        ['tab', 1],
-        ['enter', 2]
-    ]
-
-    return  export_dfcf_data(click_points,key_list)
-
-
-#模拟人工操作的方式导出all实时资金流
-def export_mystock2_real_capflow():
-    click_points=[
-        [dfcf_menu_points, '自选股'],
-        [mystock_botton_menu, '自选股'],
-        [hs_rank_top_menu, '资金流向'],
-        [204, 312]
-    ]
-    key_list = [
-        ['down', 12],
-        ['right', 1],
-        ['enter', 1],
-        ['tab', 4],
-        ['up', 3],
-        ['tab', 1],
-        ['enter', 2]
-    ]
-
-    return  export_dfcf_data(click_points,key_list)
-
-def export_mystock_real_capflow():
-    click_points=[
-        [dfcf_menu_points,'自选股'],
-        [mystock_botton_menu, '自选股'],
-        [hs_rank_top_menu, '资金流向'],
-        [204, 312]
-    ]
-    key_list = [
-        ['down', 12],
-        ['right', 1],
-        ['enter', 1],
-        ['tab', 4],
-        ['up', 3],
-        ['tab', 1],
-        ['enter', 2]
-    ]
-
-    return  export_dfcf_data(click_points,key_list)
-
-def export_mystock2_real_status():
-    click_points=[
-        [175,40],
-        [178,692],
-        [127,62],
-        [204, 312]
-    ]
-    key_list = [
-        ['down', 12],
-        ['right', 1],
-        ['enter', 1],
-        ['tab', 4],
-        ['up', 3],
-        ['tab', 1],
-        ['enter', 2]
-    ]
-
-    return  export_dfcf_data(click_points,key_list)
-
-'''
-   获取自选股实时状态
-   自选股序列可扩充，目前支持7种
-'''
-def export_mystock_real_status(index=0):
-    mystock_list=['自选股','qsz2','1buy','2buy','paz','pabuy','hot']
-
-    if index>=len(mystock_list):
-        return
-
-    click_points=[
-        [dfcf_menu_points,'自选股'],
-        [mystock_botton_menu, mystock_list[index]],
-        [hs_rank_top_menu, '行情列表'],
-        [204, 312]
-    ]
-
-
-    key_list = [
-        ['down', 12],
-        ['right', 1],
-        ['enter', 1],
-        ['tab', 4],
-        ['up', 3],
-        ['tab', 1],
-        ['enter', 2]
-    ]
-
-    return  export_dfcf_data(click_points,key_list)
-
-
 
 #获取字段内容并转成数字类型
 def get_item_from_line(line,value_index=[],non_value_index=[]):
@@ -709,7 +635,6 @@ def get_item_from_line(line,value_index=[],non_value_index=[]):
             return  True
         except:
             return  False
-
 
     data=[]
     try:
@@ -728,7 +653,10 @@ def get_item_from_line(line,value_index=[],non_value_index=[]):
                         elif is_float(item) :
                             item=float(item)
                         elif is_float(item[:-2]):
-                            item = float(item[:-2])
+                            if '万' in item:
+                                item = float(item[:-2])/10000
+                            else:
+                                item = float(item[:-2])
                         else:
                             item=0.0
                     else:
@@ -772,7 +700,7 @@ def get_item_from_line(line,value_index=[],non_value_index=[]):
     dfcf导出的数据格式为文本格式，字段间用tab分隔，每条记录一行用（\n）分隔
     第一行为标题栏，记录各字段名，第二行起是具体内容
 '''
-def format_dfcf_export_text(export_text,values='',non_values=''):
+def format_dfcf_export_text(export_text,values=[],non_values=[],pd_table=True,mul_lines=0):
     index=0
     data_list=[]
     #get title
@@ -784,7 +712,11 @@ def format_dfcf_export_text(export_text,values='',non_values=''):
     #确定数值类型的字段序号
     title=data_list[0]
     values_index=[title.index(value) for value in values]
-    non_values_index = [title.index(value) for value in non_values]
+
+    non_values_index =[]
+    for value in non_values:
+        if value in title:
+            non_values_index.append(title.index(value))
 
     if len(values_index)>0:
         while index<len(export_text):
@@ -792,134 +724,769 @@ def format_dfcf_export_text(export_text,values='',non_values=''):
             line=export_text[index:next_end]
             index=next_end+1
             data_list.append(get_item_from_line(line,values_index))
-
-    if len(non_values_index)>0:
+    elif len(non_values_index)>0:
         while index<len(export_text):
             next_end=index+export_text[index:].index(b'\n')
             line=export_text[index:next_end]
             index=next_end+1
+
+            #双行处理
+            if mul_lines==1:
+                next_end = index + export_text[index:].index(b'\n')
+                line += export_text[index:next_end]
+                index = next_end + 1
+
             data_list.append(get_item_from_line(line,'',non_values_index))
 
             # 确定数值类型的字段序号
 
-    data = pd.DataFrame(data_list[1:])
-    data.rename(columns={i: title[i] for i in range(len(title))}, inplace=True)
-    return  data
+    if pd_table==True:
+        data = pd.DataFrame(data_list[1:])
+        data.rename(columns={i: title[i] for i in range(len(title))}, inplace=True)
+        return  data
+    else:
+        return data_list
 
-def read_allstock_real_capflow():
-    real_status =export_allstock_real_capflow() # export_mystock_real_capflow()  # export_allstock_real_capflow():
+
+'''--------------------基于东方财富的阶段统计数据处理--------------------------
+1、增加字段：金额、量比、市盈率、市净率、流通市值、流通股本
+下载历史数据：点击(810，90)进入：最近两年数据（604，261）、下载（811，528）、关闭（911，528）。
+'''
+def export_period_statics(index=-1,detect_buy=True,pe=[1,80]):
+    #点击(810，90)进入：最近两年数据（604，261）、下载（811，528）、关闭（911，528）
+    downlown_history_point=[[810,90],[604,261],[811,528],[911,528]]
+
+    def export_allstock_period_statics():
+        click_points=[
+            [dfcf_top_menu_points,'沪深排行'],    #沪深排行
+            [hs_rank_botton_menu, '沪深A股'],  #沪深A股
+            [hs_rank_top_menu, '阶段统计'],
+            [204, 150]   #呼出右键菜单
+        ]
+        key_list = [
+            ['down', 7],
+            ['right', 1],
+            ['enter', 1],
+            ['tab', 4],
+            ['up', 3],
+            ['tab', 1],
+            ['enter', 2]
+        ]
+
+        return  export_dfcf_data(click_points,key_list)
+
+    def export_mystock_period_statics(index=0):
+
+        if index >= len(mystock_list) or index<0:
+            return
+
+        click_points = [
+            [dfcf_top_menu_points, '自选股'],
+            [mystock_botton_menu, mystock_list[index]],
+            [hs_rank_top_menu, '行情列表'],
+            [204, 150]
+        ]
+
+
+        key_list = [
+            ['down', 8],
+            ['right', 1],
+            ['enter', 1],
+            ['tab', 4],
+            ['up', 3],
+            ['tab', 1],
+            ['enter', 2]
+        ]
+
+        return  export_dfcf_data(click_points,key_list)
+
+    # 阶段统计
+    # 自定义1至5日、10日、20日、30日成交量（换手率）、成交金额、振幅、复权后的均价，
+    # 自行计算波动率：寻找突破者
+    def read_real_period_static(all_stock=True, mystock=0):
+        if all_stock:
+            real_status = export_allstock_period_statics()  # export_mystock_real_status()  #      export_real_capflow()
+        else:
+            real_status = export_mystock_period_statics(index=mystock)  # export_real_capflow()
+
+        non_values = [u'代码', u'名称']
+        period_static = format_dfcf_export_text(real_status, '', non_values)
+
+        # 统一排列字段名
+        dates = ['1', '2', '3', '4', '5', '10', '20', '30']
+        items = [u'日换手率%', u'日成交额', u'日振幅', u'日均价']
+
+        cols = non_values
+        for item in items:
+            for date in dates:
+                cols.append(date + item)
+
+        period_static = period_static[cols]
+        print(period_static[:2])
+
+        # 按字段进行排序
+        return period_static
+
+    # 基于 f1=涨幅%  f5=5日涨幅%	f10=10日涨幅%	    f20=20日涨幅%	 判断当前趋势
+    # 基于最近10日计算趋势，将来改为基于20日涨跌计算趋势或权重
+    # 0 趋势不明朗，波动中，》100 升，<-100跌
+    def detect_trend(period_statics):
+
+        for i in range(len(period_statics)):
+            if    period_statics.loc[i,'涨幅%']>0 \
+              and period_statics.loc[i,'5日涨幅%']>-3 \
+              and period_statics.loc[i,'10日涨幅%']>0:
+                period_statics.loc[i, 'trend']=100+\
+                     period_statics.loc[i,'涨幅%']\
+                    +period_statics.loc[i,'5日涨幅%']\
+                    +period_statics.loc[i, '5日涨幅%']
+            elif period_statics.loc[i,'涨幅%']<0 \
+              and period_statics.loc[i,'5日涨幅%']<2 \
+              and period_statics.loc[i,'10日涨幅%']<0:
+                period_statics.loc[i, 'trend'] =-100+ \
+                    period_statics.loc[i, '涨幅%'] \
+                    + period_statics.loc[i, '5日涨幅%'] \
+                    + period_statics.loc[i, '5日涨幅%']
+            else:
+                period_statics.loc[i, 'trend']=0
+
+        return period_statics
+
+    #  main start
+    def start():
+        pass
+
+    if index==-1:
+        #all stock
+        period_statics=export_allstock_period_statics()
+    else:
+        period_statics=export_mystock_period_statics(index=index)
+
+    '''  主要字段
+    代码	名称	最新	总手	金额 量比 市盈率	市净率	流通市值	流通股本	
+    涨幅%  5日涨幅%	10日涨幅%	    20日涨幅%	
+    换手%  5日换手率%	10日换手率%	20日换手率%	
+    5日跑赢大盘天数	10日跑赢大盘天数	20日跑赢大盘天数	
+    '''
+
     non_values = [u'代码', u'名称']
 
-    real_status = format_dfcf_export_text(real_status,'',non_values)
+    period_statics = format_dfcf_export_text(period_statics, '', non_values)
+
+    #剔除高风险、低成交额、低换手率标的
+    period_statics = period_statics[period_statics['市盈率'] > pe[0]]
+    period_statics = period_statics[period_statics['市盈率'] < pe[1]]
+    period_statics = period_statics[period_statics['换手%'] > 0.8]
+    period_statics = period_statics[period_statics['金额'] > 0.4]  #成交额4000万元以上
+
+    #回避最近10日涨幅超过30%的大涨标的,避免追高
+    period_statics = period_statics[period_statics['10日涨幅%'] <30]
+
+    period_statics=period_statics.reset_index()
+    period_statics = detect_trend(period_statics)
+
+    if detect_buy:
+        #detect buy
+        period_statics=period_statics[period_statics['trend']>0].sort_values(
+            by='trend',ascending=False)
+        pass
+    else:
+        #detect sell
+        period_statics = period_statics[period_statics['trend'] <0].sort_values(
+            by='trend',ascending=False)
+        pass
+
+    return  period_statics
+
+#实时加仓数据  增仓排名,每个交易日计算一次即可，实时加仓信息通过实时资金流计算
+def read_real_add_holding(all_stock=True, index=-1, detect_buy=True):
+
+    def export_allstock_real_add_holding(botton_menu='沪深A股'):
+        click_points=[
+            [dfcf_top_menu_points,'沪深排行'],    #沪深排行
+            [hs_rank_botton_menu, botton_menu],
+            [hs_rank_top_menu, '增仓排名'],   #增仓排名
+            [204, 312]   #呼出右键菜单
+        ]
+        key_list = [
+            ['down', 7],
+            ['right', 1],
+            ['enter', 1],
+            ['tab', 4],
+            ['up', 3],
+            ['tab', 1],
+            ['enter', 2]
+        ]
+
+        return  export_dfcf_data(click_points,key_list)
+
+    def export_mystock_real_add_holding(index=0):
+        if index >= len(mystock_list) or index<0:
+            return
+
+        click_points = [
+            [dfcf_top_menu_points, '自选股'],
+            [mystock_botton_menu, mystock_list[index]],
+            [hs_rank_top_menu, '增仓排名'],
+            [204, 150]
+        ]
+
+        key_list = [
+            ['down', 12],
+            ['right', 1],
+            ['enter', 1],
+            ['tab', 4],
+            ['up', 3],
+            ['tab', 1],
+            ['enter', 2]
+        ]
+
+        return  export_dfcf_data(click_points,key_list)
+
+    #
+    if all_stock:
+        real_status = export_allstock_real_add_holding()  # export_mystock_real_status()  #      export_real_capflow()
+    else:
+        real_status = export_mystock_real_add_holding(index=index)  # export_real_capflow()
+
+    data_item = [
+        u'今日增仓占比', u'今日排名', u'今日排名变化', u'今日涨幅%',
+        u'3日增仓占比', u'3日排名', u'3日排名变化', u'3日涨幅%',
+        u'5日增仓占比', u'5日排名', u'5日排名变化', u'5日涨幅%',
+        u'10日增仓占比', u'10日排名', u'10日排名变化', u'10日涨幅%'
+    ]
+    # 各数据字段打分权重表，与data_item对应
+    rank_coff = [2, -0.00, 0.01, 2,
+                 2, -0.00, 0.02, 2,
+                 2, -0.00, 0.03, 2,
+                 2, -0.00, 0.04, 2
+                 ]
+
+    values = [u'序', u'代码', u'最新', u'涨幅%'] + data_item
+
+    display_values = [u'代码', u'今日增仓占比', '3日增仓占比', '5日增仓占比', '10日增仓占比',
+                      u'今日排名变化', u'3日排名变化', u'5日排名变化', u'10日排名变化',
+                      u'今日涨幅%', u'3日涨幅%', u'5日涨幅%', u'10日涨幅%'
+                      ]
+
+    non_values = [u'代码', u'名称', u' 所属行业']
+    real_status = format_dfcf_export_text(real_status, '', non_values)
+
+    if detect_buy:  # detect buy point
+        real_status = real_status[real_status['涨幅%'] > -3.0]
+        real_status = real_status[real_status['涨幅%'] < 6.0]
+        real_status = real_status[real_status['今日增仓占比'] > 6.0]
+        real_status = real_status[real_status['今日增仓占比'] > real_status['3日增仓占比']]
+        real_status = real_status[real_status['3日增仓占比'] > real_status['5日增仓占比']]
+        real_status = real_status[real_status['今日排名变化'] > -200]
+        real_status = real_status.reset_index()
+        # todo 基于增仓和涨幅的排名：当日、3日、5日和10日不同权重，其结果不一样，待研究
+        real_status['rank'] = 0
+
+        for i in range(len(real_status)):
+            for item in range(len(data_item)):
+                real_status.loc[i, 'rank'] += real_status.loc[i, data_item[item]] * rank_coff[item]
+
+        sort_vols = ['rank', '代码']
+        display_values += ['rank']
+        real_status = real_status.sort_values(sort_vols, ascending=False)[display_values]
+    else:  # detect sell point
+        real_status = real_status[real_status['涨幅%'] < 5.0]
+        real_status = real_status[real_status['今日增仓占比'] < -2]
+        real_status = real_status[real_status['今日排名变化'] < -100]
+        real_status = real_status.reset_index()
+        # todo 基于增仓和涨幅的排名：当日、3日、5日和10日不同权重，其结果不一样，待研究
+        real_status['rank'] = 0
+
+        for i in range(len(real_status)):
+            for item in range(len(data_item)):
+                real_status.loc[i, 'rank'] += real_status.loc[i, data_item[item]] * rank_coff[item]
+
+        sort_vols = ['rank', '代码']
+        display_values += ['rank']
+        real_status = real_status.sort_values(sort_vols, ascending=True)[display_values]
+
+    # 使用datetime.now()
+    now = gmTools.get_last_trade_datetime()
+    int_time = now.hour * 100 + now.minute
+    real_status['time'] = int_time
+
     return real_status
 
 
-def read_mystock_real_capflow(index=0):
-    if index==0:
-        real_status =export_mystock_real_capflow()
+#模拟人工操作的方式导出all实时资金流
+'''
+序	代码	名称	最新	涨幅%	主力净流入	集合竞价	超大单流入	超大单流出	超大单净额	超大单净占比%	大单流入	大单流出	大单净额	大单净占比%	中单流入	中单流出	中单净额	中单净占比%	小单流入	小单流出	小单净额	小单净占比%	
+1	002460	赣锋锂业	72.41	3.47	1.85亿		794		4.69亿		-2.93亿		1.76亿		7.35		8.08亿		-8.00亿		851万		0.36		7.04亿		-8.03亿		-9936万		-4.15		4.05亿		-4.90亿		-8516万		-3.56		
+2	600271	航天信息	26.32	4.49	7526万		141		1.18亿		-5591万		6212万		10.06		1.86亿		-1.73亿		1314万		2.13		1.73亿		-2.08亿		-3464万		-5.61		1.09亿		-1.50亿		-4062万		-6.58
+
+代码    	集合竞价	超大单流入	超大单流出	大单流入	大单流出	中单流入	中单流出	小单流入	小单流出	
+002460	4225万	5.40亿		-4.01亿		9.63亿	-9.86亿	8.93亿	-9.61亿	5.32亿	-5.79亿		
+600271	141万	1.73亿		-6972万		2.36亿	-2.31亿	2.33亿	-2.85亿	1.53亿	-2.09亿
+    当日600271 集合竞价阶段总成交141万、555手，全部流入单成交额与流出单成交额相等，
+全部流入单成交额加集合竞价成交额等于当日总成交额。
+  深圳股票的集合竞价的金额与分钟图的金额不一致,以分钟图的数据为准。
+
+    结合L2大户室的信息：顶级挂单，拖拉机单，强势狙击和主力踪迹使用，基于资金流的短线操作
+'''
+last_capflow=None
+main_capflow=[]  #主力单数据队列
+def read_real_capflow(index=-1,eob=0):
+    global last_capflow
+
+    title = ['代码', 'eob', '主力净流入', '超大单流入', '超大单流出', '超大单净额', '超大单净占比%',
+            '大单流入', '大单流出', '大单净额', '大单净占比%']
+
+    # 模拟人工操作的方式导出all实时资金流
+    def export_allstock_real_capflow():
+        click_points = [
+            [dfcf_top_menu_points, '沪深排行'],
+            [hs_rank_top_menu, '资金流向'],
+            [hs_rank_botton_menu, '沪深A股'],
+            ['delay', 1],
+            [273, 150]
+        ]
+        key_list = [
+            ['down', 7],
+            ['right', 1],
+            ['enter', 1],
+            ['tab', 4],
+            ['up', 3],
+            ['tab', 1],
+            ['enter', 2]
+        ]
+
+        return export_dfcf_data(click_points, key_list)
+
+    def export_mystock_real_capflow(index=0):
+        if index >= len(mystock_list) or index < 0:
+            return
+
+        click_points = [
+            [dfcf_top_menu_points, '自选股'],
+            [mystock_botton_menu, mystock_list[index]],
+            [hs_rank_top_menu, '资金流向'],
+            [204, 150]
+        ]
+        key_list = [
+            ['down', 12],
+            ['right', 1],
+            ['enter', 1],
+            ['tab', 4],
+            ['up', 3],
+            ['tab', 1],
+            ['enter', 2]
+        ]
+
+        return export_dfcf_data(click_points, key_list)
+
+    #检测大单成交 用于粗略判断近期主力资金趋势与标的
+    def check_big_trade(old_flow,new_flow):
+        delta_flow=(new_flow-old_flow).sort_values(by='主力净流入',ascending=False)
+
+        pass
+
+    # --------------------------------------------------------------------------------
+    try:
+        if index==-1:
+            real_status =export_allstock_real_capflow()
+            file_path='沪深A股'
+        else:
+            real_status = export_mystock_real_capflow(index=index)
+            file_path=mystock_list[index]
+
+        non_values = [u'代码', u'名称']
+
+        # 返回列表，自行处理数据,values='',non_values=''
+        real_status = format_dfcf_export_text(
+            export_text=real_status,
+            values=[],non_values=non_values,pd_table=True
+        )[title]
+
+        real_status['eob']=eob
+        # check_big_trade(old_cap=last_capflow,new_flow=real_status)
+        last_capflow=real_status.copy()
+        file_path="e:\\data\\%s-cap-%s.txt"%(file_path,datetime.datetime.now().date())
+        write_text_file(file_path,msg=real_status.values.tolist(),title=title)
+
+        return real_status
+
+    except:
+        pass
+
+#每个交易日开始前或闭市后计算一次即可，实时的DDE数据可通过实时资金流自行计算
+def read_real_DDE(index=-1):
+    # 模拟人工操作的方式导出all实时资金流
+    def export_allstock_DDE():
+        click_points = [
+            [dfcf_top_menu_points, '沪深排行'],
+            [hs_rank_top_menu, 'DDE决策'],
+            [hs_rank_botton_menu, '沪深A股'],
+            [273, 307]
+        ]
+        key_list = [
+            ['down', 7],
+            ['right', 1],
+            ['enter', 1],
+            ['tab', 4],
+            ['up', 3],
+            ['tab', 1],
+            ['enter', 2]
+        ]
+
+        return export_dfcf_data(click_points, key_list)
+
+    def export_mystock_DDE(index=0):
+        if index >= len(mystock_list) or index < 0:
+            return
+
+        click_points = [
+            [dfcf_top_menu_points, '自选股'],
+            [mystock_botton_menu, mystock_list[index]],
+            [hs_rank_top_menu, 'DDE决策'],
+            [204, 150]
+        ]
+        key_list = [
+            ['down', 12],
+            ['right', 1],
+            ['enter', 1],
+            ['tab', 4],
+            ['up', 3],
+            ['tab', 1],
+            ['enter', 2]
+        ]
+
+        return export_dfcf_data(click_points, key_list)
+
+    #--------------------------------------------------
+    if index==-1:
+        real_status =export_allstock_DDE()
     else:
-        real_status = export_mystock2_real_capflow()
+        real_status = export_mystock_DDE(index=index)
 
     non_values = [u'代码', u'名称']
 
-    real_status = format_dfcf_export_text(real_status, '', non_values)
+    #返回列表，自行处理数据,values='',non_values=''
+    real_status = format_dfcf_export_text(
+        export_text=real_status,
+        values='',non_values=non_values,pd_table=False
+    )
+
+    return real_status
+
+'''
+L2Room_top_menu=[
+    
+    ['顶级挂单',127,62],顶级挂单是指委托挂单在9000手以上的挂单，一般都为大主力所为，
+    通过跟踪这些挂单的委托买入、委托卖出，以及撤销委托的行为从而发现大主力的踪迹以及意图。
+    
+    ['拖拉机单',196,62],拖拉机单是指有多笔相同数目的委买和委卖挂单，一般是同一主力所
+    为。主力可以将大单拆成数笔同样的小单来隐藏自己的踪迹，也可以通过连续相同数目的大单
+    向表明自己态度。用户可以跟踪这些拖拉机单来发现主力和判断主力的方向。
+    
+    ['强势狙击',266,62],强势狙击功能是基于交易人气量、股性活跃度和历史波动率等因素，
+    分析测算推动股价上升的各种潜在力量而研发的一套算法模型，力求辅助用户挖掘市场上短线
+    有望呈现强势的个股，并通过实时榜单形式发布。
+    
+    ['主力踪迹',329,62], 主力踪迹是通过LEVEL-2数据跟踪, 主要从顶级大单买入、拖拉机
+    单买入以及DDX连续飘红中，对这三个LEVEL-2的数据分析，优选出有主力介入的股票。
+    仅记录最近3个交易日数据，用途似乎不大，可自行管理。
+    
+    ['L2核心内参',400,62],
+    ['资金全景',476,62],针对全市场的资金流
+    ['DDE全景',546,62]，最对全市场的DDE数据
+    数据要做分析，剔除相同的内容
+    1、顶级挂单 保留的数据：
+        代码,买卖方向,挂单时间,挂单价格,最新挂单明细,挂单总额,买入次数,卖出次数
+    2、拖拉机单 保留的数据：
+        代码,买卖方向,挂单时间,挂单价格,最新挂单明细,挂单总数,挂单总额,买入次数,卖出次数 
+    3、强势狙击 保留的数据：   
+        代码，强势力度，入榜时间，5日入榜，3日涨幅 
+'''
+qsjj_list=None
+djgd_list=None
+tljd_list=None
+
+def read_real_L2Room(top_menu='强势狙击',is_test=False):
+    global qsjj_list,djgd_list,tljd_list
+
+    def test(top_menu='强势狙击'):
+        global qsjj_list, djgd_list, tljd_list
+
+        qsjj_list = [
+            ['000017', '300', '11:27:03', '0次', 6.47],
+            ['000020', '300', '11:16:53', '0次', 4.55]
+        ]
+
+        djgd_list = [
+            ['000001', '顶级买单', '11:15', 11.07, '1万手', 1107.0, 3, 2],
+            ['000011', '顶级买单', '10:07', 14.77, '1万手', 1477.0, 1, 0],
+            ['000078', '顶级卖单', '10:48', 6.23, '9068手', 565.0, 0, 1],
+            ['000413', '顶级卖单', '10:11', 8.55, '1万手', 855.0, 12, 1]
+        ]
+        tljd_list = [
+            ['000002', '拖拉机卖', '11:08', 27.76, '100手*3', '3.00万', 83.3, 0, 1],
+            ['000703', '拖拉机买', '09:50', 23.8, '113手*3', '3.39万', 80.7, 1, 0],
+            ['002025', '拖拉机卖', '10:13', 24.73, '172手*3', '5.16万', 128.0, 0, 1],
+            ['002027', '拖拉机买', '09:54', 12.14, '200手*3', '6.00万', 72.8, 2, 0],
+            ['002067', '拖拉机卖', '11:10', 4.75, '500手*3', '15.0万', 71.3, 0, 1]
+        ]
+
+        if top_menu == '强势狙击':
+            real_status = [
+                ['000017', '300', '11:27:03', '0次', 6.47],
+                ['000020', '300', '11:16:53', '0次', 4.55],
+                ['000413', '300', '10:03:40', '0次', 4.68],
+                ['000425', '300', '09:36:13', '0次', 2.76],
+                ['000586', '500', '11:04:42', '0次', 8.54],
+                ['002009', '300', '10:33:09', '0次', 1.51],
+                ['002023', '300', '11:01:37', '0次', 4.18],
+                ['002044', '300', '10:17:54', '0次', 1.74],
+                ['002088', '300', '10:40:18', '0次', 2.31],
+                ['002156', '300', '09:25:00', '0次', -0.25],
+                ['002180', '310', '09:36:13', '0次', 3.54],
+                ['002258', '301', '10:28:04', '0次', 5.36],
+            ]
+            qsjj_list =check_diff(old_list=qsjj_list, new_list=real_status)
+        elif top_menu == '顶级挂单':
+            real_status=[
+                ['000078', '顶级卖单', '10:48', 6.23, '9068手', 565.0, 0, 1],
+                ['000413', '顶级卖单', '10:11', 8.55, '1万手', 855.0, 12, 1],
+                ['000425', '顶级买单', '11:01', 4.33, '1万手', 433.0, 1, 3],
+                ['000528', '顶级买单', '10:53', 10.51, '9999手', 1051.0, 12, 0],
+                ['000543', '顶级卖单', '10:14', 4.65, '1万手', 465.0, 0, 1],
+                ['000592', '顶级卖单', '09:22', 4.11, '1万手', 411.0, 0, 2],
+                ['000691', '顶级卖单', '10:06', 6.09, '1万手', 609.0, 0, 1],
+                ['000718', '顶级卖单', '09:15', 4.1, '1万手', 410.0, 0, 2],
+                ['000725', '顶级卖单', '11:27', 4.41, '1万手', 441.0, 30, 57],
+                ['000735', '顶级买单', '11:18', 11.14, '1万手', 1114.0, 2, 0],
+                ['000777', '顶级卖单', '10:12', 13.69, '9554手', 1308.0, 0, 1],
+                ['000795', '顶级买单', '11:00', 5.45, '9300手', 507.0, 1, 0],
+                ['000937', '顶级卖单', '10:11', 4.79, '9067手', 434.0, 0, 1],
+                ['000975', '顶级卖单', '11:04', 16.38, '1万手', 1638.0, 0, 1],
+                ['002023', '顶级买单', '10:52', 12.5, '9999手', 1250.0, 1, 0],
+                ['002160', '顶级卖单', '10:09', 6.1, '9125手', 557.0, 0, 1],
+                ['002178', '顶级买单', '10:02', 6.6, '9900手', 653.0, 1, 0],
+                ['002194', '顶级卖单', '09:54', 5.62, '9100手', 511.0, 0, 1]
+            ]
+            djgd_list=check_diff(old_list=djgd_list, new_list=real_status)
+        elif top_menu == '拖拉机单':
+            real_status=[
+                ['002027', '拖拉机买', '09:54', 12.14, '200手*3', '6.00万', 72.8, 2, 0],
+                ['002067', '拖拉机卖', '11:10', 4.75, '500手*3', '15.0万', 71.3, 0, 1],
+                ['002185', '拖拉机买', '10:01', 6.78, '500手*3', '15.0万', 102.0, 1, 0],
+                ['002463', '拖拉机买', '10:49', 4.4, '1万手*4', '400万', 1760.0, 2, 0],
+                ['002622', '拖拉机卖', '09:38', 7.63, '500手*3', '15.0万', 114.0, 0, 1],
+                ['002772', '拖拉机买', '10:47', 9.91, '100手*7', '7.00万', 69.4, 1, 0],
+                ['300137', '拖拉机卖', '09:42', 20.05, '100手*4', '4.00万', 80.2, 0, 1],
+                ['300433', '拖拉机买', '10:33', 22.03, '200手*3', '6.00万', 132.0, 1, 0],
+                ['300606', '拖拉机买', '10:02', 28.54, '200手*3', '6.00万', 171.0, 1, 0],
+                ['600059', '拖拉机卖', '10:32', 8.66, '299手*3', '8.97万', 77.7, 0, 1],
+                ['600810', '拖拉机卖', '09:54', 12.1, '100手*7', '7.00万', 84.7, 0, 1],
+                ['600887', '拖拉机卖', '09:49', 26.98, '158手*3', '4.74万', 128.0, 0, 1],
+                ['601699', '拖拉机卖', '11:13', 10.42, '123手*8', '9.84万', 103.0, 0, 1]
+            ]
+            tljd_list =check_diff(old_list=tljd_list, new_list=real_status)
 
 
-    print(real_status.loc[:2])
+    def check_diff(new_list,old_list,title=''):
+         if old_list is None:
+             file_path = 'e:\\data\\%s-%s.txt' % (top_menu, datetime.datetime.now().date())
+             write_text_file(file_path=file_path, msg=new_list, title=title)
+             return new_list
+
+         keep=[]
+         old_code=[item[0] for item in old_list]
+
+         try:
+             for row in new_list:   # 获取每行的index、row
+                 row_exist=False
+
+                 if  row[0] in old_code:
+                     start = 0
+
+                     while not row_exist:
+                        if row[0] in old_code[start:]:
+                            old_index=start+old_code[start:].index(row[0])     #todo 统一代码多项记录管理
+                            if row==old_list[old_index]:
+                                row_exist=True
+                                break
+
+                            if start>0 and old_index==0:
+                                break
+                            else:
+                                if start==0 and old_index==0:
+                                    start=1
+                                else:
+                                    start=old_index+1
+                        else:
+                            break
+
+                 if  not row_exist:
+                     keep.append(row)
+                     old_list.append(row)
+                     #todo new code process
+
+         except:
+            write_log_msg()
+
+         if len(keep)>0:
+             new_code = [item[0] for item in keep]
+             print('\n')
+             print(top_menu)
+             print('new code')
+             print(new_code)
+             file_path='e:\\data\\%s-%s.txt'%(top_menu,datetime.datetime.now().date())
+             write_text_file(file_path=file_path,msg= keep,title=title)
+             #send_mail(top_menu,str(keep))
+
+         else:
+             new_code=[]
+
+         return old_list,new_code
 
 
-#阶段统计
-# 自定义1至5日、10日、20日、30日成交量（换手率）、成交金额、振幅、复权后的均价，
-# 自行计算波动率：寻找突破者
-def read_real_period_static(all_stock=True,mystock=0):
-    if all_stock:
-        real_status = export_allstock_period_statics()  # export_mystock_real_status()  #      export_real_capflow()
+    if is_test:
+        test(top_menu=top_menu)
+        return
+
+    # 强势狙击
+    # 顶级挂单
+    # 拖拉机单
+
+    if top_menu=='强势狙击':
+        delay=4
+        mul_lines=0
     else:
-        real_status = export_mystock_period_statics(index=mystock)  # export_real_capflow()
+        delay=0.05
+        mul_lines = 1
 
+    click_points = [
+        [dfcf_top_menu_points, '全景图'],
+        [dfcf_left_menu_points, 'L2大户室'],
+        [L2Room_top_menu, top_menu],
+        ['delay',delay],
+        [273, 150]
+    ]
+    key_list = [
+        ['down', 7],
+        ['right', 1],
+        ['enter', 1],
+        ['tab', 4],
+        ['up', 3],
+        ['tab', 1],
+        ['enter', 2]
+    ]
 
+    try:
 
-    non_values = [u'代码', u'名称']
-    period_static = format_dfcf_export_text(real_status, '', non_values)
+        real_status= export_dfcf_data(click_points, key_list)
 
-    #统一排列字段名
-    dates = ['1', '2', '3', '4', '5', '10', '20', '30']
-    items = [u'日换手率%', u'日成交额', u'日振幅', u'日均价']
+        #--------------------------------------------------
+        non_values = [u'代码', u'名称', u'买卖方向', u'挂单时间', u'最新挂单明细', u'挂单总数',
+                      u' 所属行业',u'强势力度',u'入榜时间', u'5日入榜']
 
-    cols=non_values
-    for item in items:
-        for date in dates:
-            cols.append(date+item)
+        #返回列表，自行处理数据,values='',non_values=''
+        real_status = format_dfcf_export_text(
+            export_text=real_status,mul_lines=mul_lines,
+            values='',non_values=non_values,pd_table=True).sort_values(by='代码',ascending=True)
+        real_status=real_status.reset_index()
 
-    period_static=period_static[cols]
-    print(period_static[:2])
+        if top_menu == '强势狙击':
+            col = ['代码', '强势力度', '入榜时间', '5日入榜', '3日涨幅%']
+            qsjj_list,new_code =check_diff(old_list=qsjj_list, new_list=real_status[col].values.tolist(),title=col)
+            print(top_menu,new_code)
+        elif top_menu == '顶级挂单':
+            col = ['代码', '买卖方向', '挂单时间', '挂单价格', '最新挂单明细', '挂单总额', '买入次数', '卖出次数']
+            djgd_list,new_code=check_diff(old_list=djgd_list, new_list=real_status[col].values.tolist(),title=col)
+            print(top_menu, new_code)
+        elif top_menu == '拖拉机单':
+            col = ['代码', '买卖方向', '挂单时间', '挂单价格', '最新挂单明细', '挂单总数', '挂单总额', '买入次数', '卖出次数']
+            tljd_list,new_code =check_diff(old_list=tljd_list, new_list=real_status[col].values.tolist(),title=col)
+            print(top_menu, new_code)
 
-    #按字段进行排序
-    return period_static
+    except:
+        pass
 
-#初始	代码	名称	最新	涨幅%	涨跌	总手	现手	买入价	卖出价	涨速%	换手%	金额	市盈率
+#当前行情列表,含大量有用信息
+#初始	代码	名称	最新	涨幅%	涨跌	总手	现手	买入价	卖出价	涨速%	换手%	金额	市盈率	 所属行业	最高	最低	开盘	昨收	振幅%	量比	委比%	委差	均价	内盘	外盘	内外比	买一量	卖一量	市净率	总股本	总市值	流通股本	流通市值	3日涨幅%	6日涨幅%	3日换手%	6日换手%
+#1	600017	日照港	3.95	-1.99	-0.08	22.9万	100	3.94	3.95	0.00	0.75	9116万	17.79	 港口水运	4.01	3.93	3.99	4.03	1.99	0.76	48.20	2.16万	3.97	17.9万	5.02万	3.57	8438	29	1.12	30.8亿	121亿	30.8亿		121亿		-0.75		1.28		4.29		6.89
+#2	000818	航锦科技	14.06	-3.03	-0.44	13.1万	2	14.06	14.07	0.07	1.90	1.87亿	18.98	 化工行业	14.60	14.02	14.60	14.50	4.00	0.92	12.63	263	14.21	8.96万	4.18万	2.14	36	24	3.71	6.92亿	97.3亿	6.90亿		97.1亿		-5.70		0.21		6.62		14.89
+# 初始	代码	名称	最新	涨幅%	涨跌	总手	现手	买入价	卖出价	涨速%	换手%	金额	市盈率
 #所属行业	最高	最低	开盘	昨收	振幅%	量比	委比%	委差	均价	内盘	外盘	内外比	买一量	卖一量
 #市净率	总股本	总市值	流通股本	流通市值	3日涨幅%	6日涨幅%	3日换手%	6日换手%
-def read_real_status(all_stock=True,mystock=0):
+#根据3日、6日涨幅可判断最近6日整体趋势，3日与（6日-3日）同号趋势相等，异号反转，6日值表明了涨、跌与维持
+#换手率表明交投活跃程度，量比表明当日交易量的大小
+def read_real_status(all_stock=True,mystock_index=0):
+    '''
+       获取自选股实时状态
+       自选股序列可扩充，目前支持7种
+     初始	代码	名称	最新	涨幅%	涨跌	总手	现手	买入价	卖出价	涨速%	换手%	金额	市盈率	 所属行业	最高	最低	开盘	昨收	振幅%	量比	委比%	委差	均价	内盘	外盘	内外比	买一量	卖一量	市净率	总股本	总市值	流通股本	流通市值	3日涨幅%	6日涨幅%	3日换手%	6日换手%
+    1	600017	日照港	3.95	-1.99	-0.08	22.9万	100	3.94	3.95	0.00	0.75	9116万	17.79	 港口水运	4.01	3.93	3.99	4.03	1.99	0.76	48.20	2.16万	3.97	17.9万	5.02万	3.57	8438	29	1.12	30.8亿	121亿	30.8亿		121亿		-0.75		1.28		4.29		6.89
+    2	000818	航锦科技	14.06	-3.03	-0.44	13.1万	2	14.06	14.07	0.07	1.90	1.87亿	18.98	 化工行业	14.60	14.02	14.60	14.50	4.00	0.92	12.63	263	14.21	8.96万	4.18万	2.14	36	24	3.71	6.92亿	97.3亿	6.90亿		97.1亿		-5.70		0.21		6.62		14.89
+    3	300017	网宿科技	13.54	0.97	0.13	43.3万	110	13.54	13.55	0.00	2.69	5.87亿	37.85	 软件服务	13.71	13.37	13.48	13.41	2.54	0.96	29.80	1286	13.56	19.1万	24.2万	0.79	280	7	4.03	24.3亿	329亿	16.1亿		218亿		-1.17		1.35		9.20		20.24
+    '''
+
+    def export_mystock_real_status(index=0):
+
+        if index >= len(mystock_list) or index < 0:
+            return
+
+        click_points = [
+            [dfcf_top_menu_points, '自选股'],
+            [mystock_botton_menu, mystock_list[index]],
+            [hs_rank_top_menu, '行情列表'],
+            [204, 150]
+        ]
+
+        key_list = [
+            ['down', 12],
+            ['right', 1],
+            ['enter', 1],
+            ['tab', 4],
+            ['up', 3],
+            ['tab', 1],
+            ['enter', 2]
+        ]
+
+        return export_dfcf_data(click_points, key_list)
+
+    def export_allstock_real_status():
+        click_points = [
+            [dfcf_top_menu_points, '沪深排行'],  # 沪深排行
+            [hs_rank_botton_menu, '沪深A股'],  # 沪深A股
+            [hs_rank_top_menu, '行情列表'],
+            [204, 312]  # 呼出右键菜单
+        ]
+        key_list = [
+            ['down', 7],
+            ['right', 1],
+            ['enter', 1],
+            ['tab', 4],
+            ['up', 3],
+            ['tab', 1],
+            ['enter', 2]
+        ]
+
+        return export_dfcf_data(click_points, key_list)
+
     if all_stock:
-        real_status = export_allstock_real_status()  # export_mystock_real_status()  #      export_real_capflow()
+        real_status = export_allstock_real_status()
         values = u'序'
     else:
-        real_status = export_mystock_real_status(mystock)  # export_real_capflow()
+        real_status = export_mystock_real_status(mystock_index)
         values = u'初始'
 
     values=[values,u'代码', u'最新', u'涨幅%', u'涨跌', u'总手',
                    u'现手', u'买入价', u'卖出价', u'涨速%', u'换手%',
-                   u'金额', u'市盈率', u'最高', u'最低', u'开盘',
+                   u'金额', u'市盈率', u'市净率',u'最高', u'最低', u'开盘',
+            u'总股本',u'总市值',u'流通股本',u'流通市值',u'3日涨幅%',u'6日涨幅%',u'3日换手%',u'6日换手%',
                    u'昨收', u'量比', u'振幅%']
 
     non_values = [u'代码', u'名称', u' 所属行业']
     real_status = format_dfcf_export_text(real_status, '', non_values)
 
     return (real_status)
-
-def read_real_add_holding(all_stock=True,botton_menu='沪深A股'):
-    if all_stock:
-        real_status = export_allstock_real_add_holding(botton_menu)  # export_mystock_real_status()  #      export_real_capflow()
-    else:
-        real_status = export_mystock_real_add_holding(botton_menu)  # export_real_capflow()
-
-    values=[u'序',u'代码', u'最新', u'涨幅%',
-           u'今日增仓占比', u'今日排名',u'今日排名变化', u'今日涨幅%',
-           u'3日增仓占比', u'3日排名', u'3日排名变化',u'3日涨幅%',
-           u'5日增仓占比', u'5日排名', u'5日排名变化',u'5日涨幅%',
-           u'10日增仓占比', u'10日排名', u'10日排名变化',u'10日涨幅%'
-    ]
-
-    display_values = [ u'代码',
-              u'今日排名变化', u'3日排名变化',u'5日排名变化',u'10日排名变化',
-              u'今日涨幅%',u'3日涨幅%',u'5日涨幅%',u'10日涨幅%'
-              ]
-    non_values = [u'代码', u'名称', u' 所属行业']
-    real_status = format_dfcf_export_text(real_status, '', non_values)[display_values]
-
-    sort_vols=['今日排名变化','10日涨幅%']
-    real_status=real_status.sort_values(sort_vols,ascending=False)
-    #print(sort_vols)
-    #print(real_status.loc[:10,sort_vols])
-
-    # 使用datetime.now()
-    now = gmTools.get_last_trade_datetime()
-    int_time=now.hour*100+now.minute
-    real_status['time']=int_time
-
-    return real_status
-
-
-def read_real_capflow():
-    real_status = export_mystock_real_capflow()  # export_real_capflow()
-    values = [u'序', u'最新', u'涨幅%', u'集合竞价', u'主力净流入',
-              u'超大单净占比%', u'大单净占比%']
-
-    real_status = format_dfcf_export_text(real_status, values)
-
-
-    print(real_status.loc[:2])
 
 
 '''
@@ -932,17 +1499,30 @@ def read_real_capflow():
     流通市值
     3日、6日涨幅%、换手%
 '''
-def get_all_stock_in_sh_sz_by_params(pe=[5,80]):
+def get_all_stock_in_sh_sz_by_params(pe=[5,60]):
     col = '市盈率'
-    need_cols = [col,'代码']
+    need_cols = [col,'代码','金额']
     stocks=read_real_status(all_stock=True)[need_cols]
+
+    # 剔除无成交的标的  停牌或未上市
+    stocks = stocks[stocks['金额'] > 0.0]
 
     #按市盈率从小到大排序
     stocks=stocks.sort_values(by=col)
     stocks = stocks[stocks[col]>=pe[0] ]
     stocks = stocks[stocks[col] <= pe[1]]
     return stocks['代码'].values
-    pass
+
+def get_all_stock_current_status(all_stock=True,mystock_index=0):
+    col = '金额'
+    need_cols = [col,'代码']
+    stocks=read_real_status(all_stock=all_stock,mystock_index=mystock_index)
+
+    #按成交金额从大到小排序
+    stocks=stocks.sort_values(by=col,ascending=False)
+    #剔除无成交的标的
+    stocks = stocks[stocks[col]>0.0 ]
+    return stocks
 
 '''
     多头选股：低位起涨  1 buy
@@ -1071,7 +1651,6 @@ def check_washing(kdata,week=5):
     for i in range(data_len-week,data_len-1):
         if i-2<0:
             continue
-
         try:
             k_hight=kdata.loc[i-1,'high']-kdata.loc[i-1,'low']
             #阳线  长上影
@@ -1227,7 +1806,7 @@ def add_pazq_stock_2_mystock():
     return  tmp#
 
 
-#--------------main --------------------------------60006-----
+#--------------main -------------------------------------
 hwnd_dfcf=0
 def load_dfcf():
     global hwnd_dfcf
@@ -1244,68 +1823,136 @@ def load_dfcf():
 
         time.sleep(1)
         show_dfcf()
-        time.sleep(1)
+        time.sleep(10)
 
 mail_conten=''
-def read_save_mystock_real_addholding(mystock_holding,botton_menu='自选股',
-    send2wechat=5,is_all_stocks=False,check_buy=False,is_send_mail=False):
+def read_save_mystock_real_addholding(mystock_holding,index=0,
+    send2wechat=5,is_all_stocks=False,check_buy=False,is_send_mail=False,select_buyable=False):
     global mail_conten
 
+    show_dfcf()
     now = datetime.datetime.now()
-    #import infWECHAT as wechat
-    save_all_col = ['代码', '今日排名变化', '3日排名变化', '5日排名变化', '10日排名变化', 'time']
-    save_col = ['代码', '今日排名变化', 'time']
+    int_time = now.hour * 100 + now.minute
 
-    if mystock_holding is None :
-        tmp = read_real_add_holding(all_stock=is_all_stocks, botton_menu=botton_menu)[save_all_col]
-        if  is_all_stocks:
+    save_all_col = ['代码','rank','今日增仓占比','3日增仓占比','5日增仓占比',
+                    '10日增仓占比','今日排名变化', '3日排名变化', '5日排名变化', '10日排名变化', 'time']
+
+    save_col = ['代码', 'rank','今日增仓占比','今日排名变化', 'time']
+
+    try:
+        if is_all_stocks :
+            botton_menu='沪深A股'
+            tmp = read_real_add_holding(all_stock=is_all_stocks, index=-1)[save_all_col]
             writer = pd.ExcelWriter(botton_menu + '昨日数据' + str(now.date()) + '.xlsx')
             tmp.to_excel(writer, '昨日数据')
             writer.save()
             writer.close()
 
-        mystock_holding = tmp[save_col].copy()
-    else:
-        tmp = read_real_add_holding(all_stock=is_all_stocks, botton_menu=botton_menu)[save_col]
-        mystock_holding = pd.concat([mystock_holding, tmp], ignore_index=True)
+            mystock_holding = tmp[save_col].copy()
+        else:
+            botton_menu=mystock_list[index]
+            tmp = read_real_add_holding(all_stock=is_all_stocks, index=index)[save_col]
+            mystock_holding = pd.concat([mystock_holding, tmp], ignore_index=True)  #累计当日标的
 
+        if select_buyable:#基于增仓参数选股
+            return mystock_holding['代码'].values
+        else:
+            #cacl buy point
+            if check_buy and int_time>92500 and int_time<150500:
+                all_count=0
+                stocks=[]
+                for stock in list(tmp['代码'].values):
+                    if stock[0] == '6':
+                        stock = 'SHSE.' + stock
+                    else:
+                        stock = 'SZSE.' + stock
 
-    #最近 1、2、2、5日走势
-    if check_buy:
-        all_count=0
-        stocks=[]
-        for stock in list(tmp['代码'].values):
-            if stock[0] == '6':
-                stock = 'SHSE.' + stock
+                    if get_stock_1buy('', stocks=[stock]) \
+                            or get_stock_2buy('', stocks=[stock]):
+                        # todo 考虑利用1、3、5、10日的涨幅判断当前走势是否具备介入机会
+                        stocks.append(stock[5:])
+                        all_count += 1
+                        if all_count >= 10:
+                            break
+
+                msg ='\n[' +botton_menu+ ']加仓:' + str(stocks)
+                #send_mail("市场动态",msg=msg)
+                #wechat.send_market_msg(msg)
             else:
-                stock = 'SZSE.' + stock
+                #仅输出加仓排名大的标的
+                msg = '\n['+ botton_menu+ ']加仓:' + str(tmp['代码'][:send2wechat].values)
 
-            if get_stock_1buy('', stocks=[stock]) \
-                    or get_stock_2buy('', stocks=[stock]):
-                # todo 考虑利用1、3、5、10日的涨幅判断当前走势是否具备介入机会
-                stocks.append(stock[5:])
-                all_count += 1
-                if all_count >= 10:
-                    break
+            mail_conten += msg
+            if is_send_mail and len(mail_conten)>0:
+                    #wechat.send_market_msg(msg)
+                    #if  int_time>92500 and int_time<150500:
+                    send_mail("市场动态", msg=mail_conten)
+                    print(' \n[%s] send msg to user\n %s \n '%(now.time(),mail_conten))
 
-        msg ='\n[' +botton_menu+ ']加仓:' + str(stocks)
-        #send_mail("市场动态",msg=msg)
-        #wechat.send_market_msg(msg)
+                    mail_conten=''
 
-    else:
-        msg = '\n['+ botton_menu+ ']加仓:' + str(tmp['代码'][:send2wechat].values)
-        #wechat.send_market_msg(msg)
-        pass
+            return  mystock_holding
 
-    mail_conten += msg
-    if is_send_mail:
+    except:
+        write_log_msg()
+
+#基于增仓数据的买卖点检测
+def detect_mystock_sell_real_addholding(mystock_holding, index=0,
+                                      send2wechat=5, is_all_stocks=False,
+                                      check_buy=False, is_send_mail=False):
+    global mail_conten
+
+    show_dfcf()
+    now = datetime.datetime.now()
+    int_time = now.hour * 100 + now.minute
+
+    save_all_col = ['代码', 'rank', '今日增仓占比', '3日增仓占比', '5日增仓占比',
+                    '10日增仓占比', '今日排名变化', '3日排名变化', '5日排名变化', '10日排名变化', 'time']
+    save_col = ['代码', 'rank', '今日增仓占比', '今日排名变化', 'time']
+
+    try:
+        if mystock_holding is None:
+            tmp = read_real_add_holding(all_stock=is_all_stocks, index=index,detect_buy=False)[save_all_col]
+            mystock_holding = tmp[save_col].copy()
+        else:
+            tmp = read_real_add_holding(all_stock=is_all_stocks, index=index,detect_buy=False)[save_all_col]
+            mystock_holding = pd.concat([mystock_holding, tmp], ignore_index=True)  # 累计当日标的
+
+        # cacl sell point  save the lastest 10
+        tmp=tmp[:send2wechat].reset_index()
+
+        mail_conten +='[sell mystock] %s' % tmp['代码'].values
+
+        if is_send_mail and len(mail_conten) > 0:
+            # wechat.send_market_msg(msg)
+            # if  int_time>92500 and int_time<150500:
             send_mail("市场动态", msg=mail_conten)
-            mail_conten=''
-            print(' [%s] send msg to user'%(now.time()))
+            print(' \n[%s] send msg to user\n %s \n ' % (now.time(), mail_conten))
 
+            mail_conten = ''
 
-    return  mystock_holding
+            return mystock_holding
 
+    except:
+        write_log_msg()
+
+# 分析最近2000交易日数据，效果不好，不足以指导操作
+def check_washing_in_sh_sz_2_hot():
+    load_dfcf()
+    tmp = read_allstock_real_capflow()['代码'].tolist()
+    stocks = []
+    for stock in tmp:
+        if stock[0] == '6':
+            stocks.append('SHSE.' + stock)
+        else:
+            stocks.append('SZSE.' + stock)
+
+    now = datetime.datetime.now()
+    print(str(now) + ' caculate washing')
+    add_stock_2_mystock('hot', get_stock_washing(stock_list=stocks,
+                                                 week_in_seconds=4 * 60 * 60, count=30, cacl_reward=True))
+
+#TODO 邮件发送有时不可靠
 def send_mail(title,msg):
     import smtplib
 
@@ -1325,86 +1972,129 @@ def send_mail(title,msg):
     msg['To'] = Header("市场动态", 'utf-8')
     msg['Subject'] = Header(subject, 'utf-8')
     smtp = smtplib.SMTP_SSL(smtpserver, 465)
-    smtp.login(username, password)
-    smtp.sendmail(sender, receiver, msg.as_string())
-    smtp.quit()
+    retry=0
+
+    while retry<6:
+        try:
+            smtp.login(username, password)
+            smtp.sendmail(sender, receiver, msg.as_string())
+            smtp.quit()
+            break
+        except:
+            retry+=1
+
+#潘倩计算1、2买标的
+def cacl_12buy(favorite_stocks=''):
+    # 初始化当日可选标的列表
+    now = datetime.datetime.now()
+    print(str(now) + ' caculate all stock 1buy')
+
+    #从阶段统计中获取待评估的标的
+    tmp1=export_period_statics(index=-1,detect_buy=True,pe=[1,60])['代码'].values
+
+    #基于主力增仓数据获取标的
+    tmp = read_save_mystock_real_addholding(
+        None,
+        index=-1, send2wechat=10,
+        is_all_stocks=True, check_buy=True,
+        is_send_mail=False, select_buyable=True
+    )
+
+    #两种标的合成，以阶段统计数据为主
+    stocks = tmp
+    tmp=[]
+    for stock in stocks:
+        if stock in tmp1:
+            tmp.append(stock)
+
+    # 两种标的合成，以关注的数据为主
+    if len(favorite_stocks)==0:
+        stocks = tmp
+    else:
+        stocks = []
+        for stock in tmp:
+            if stock in favorite_stocks:
+                stocks.append(stock)
+                if len(stocks) > 200:
+                    break
+
+    add_stock_2_mystock('1buy', stocks)
+
+    #获取自选股信息,计算2买
+    print(str(now) + ' caculate my stock buy1/buy2 by addholding')
+    tmp = read_save_mystock_real_addholding(
+        None, index=0, check_buy=False, select_buyable=True)
+
+    add_stock_2_mystock('hot', tmp)
+
+    print(str(now) + ' caculate pabuy buy')
+    tmp = read_save_mystock_real_addholding(
+        None, index=5, check_buy=False, select_buyable=True)
+    add_stock_2_mystock('2buy', tmp)
 
 #交易日循环
+'''
+    利用独立线程定期完成实时性强、时效高的参数自动获取资金流、顶级挂单、拖拉机单、强势狙击，
+其他参数时效性不高，每个交易日读取一次并保存即可。
+'''
 def trade_date_loop():
-    load_dfcf()
-    favorite_stocks=get_all_stock_in_sh_sz_by_params()
-    favorite_stocks.sort()   #按代码排序，便于后续使用,6位数字符串
-
-    mystock_holding = None
-    buy1_holding = None
-    buy2_holding = None
-    pabuy_holding = None
     allstock_holding = None
 
-    count = 0
-    last_eob=0
-    next_trade_datetime=str(datetime.datetime.now().date())  #下一交易日
-    stock_list_need_init = True
-    data_change=False
-    while True:
-        now = datetime.datetime.now()
-
-        #非交易时间段  不做处理
-        int_time=now.hour*100+now.minute
-        if stock_list_need_init and \
-            next_trade_datetime == str(now.date()):
-
-            dailyinit = "dailyinit.txt"
-            if not os.path.isfile(dailyinit):
-                f = open(dailyinit, "wt")
-                tmp = ''
-            else:
-                f = open(dailyinit, "r+")
-                tmp = f.read()
-                f.seek(0)
-
-            if tmp != next_trade_datetime:
-                f.write(next_trade_datetime)
-
-                # 初始化当日可选标的列表
-                stock_list_need_init = False
-                tmp = gmTools.get_stocks_form_blocks(FAVORTE_BLOCKS,favorite_stocks=favorite_stocks)
-
-                print(str(now) + ' caculate washing')
-                add_stock_2_mystock('hot', get_stock_1buy(block='', stocks=tmp))
-
-                now = datetime.datetime.now()
-                print(str(now)+' caculate 1buy')
-                add_stock_2_mystock('1buy', get_stock_1buy(block='', stocks=tmp))
-                
-                now = datetime.datetime.now()
-                print(str(now)+' caculate 2buy')
-                add_stock_2_mystock('2buy', get_stock_2buy(block='', stocks=tmp))
-
-            f.close()
-            stock_list_need_init = False
-        #'''
-        if  int_time>1520 or now.hour<9 :
-            mystock_holding=None
-            buy1_holding=None
-            buy2_holding = None
-            pabuy_holding = None
-            allstock_holding=None
-            now = datetime.datetime.now()
-            print(str(now)+' waiting to trade\n')
-            time.sleep(5 * 60)
-            continue
-        #'''
+    #检测当日实时累计加仓情况，附带3、5、10日加仓数据统计
+    #利用实时资金流可推算出累计资金流，本函数每日调用一次即可，待优化
+    def check_addholding(count):
+        global allstock_holding
 
         try:
-            # 次日凌晨初始化下一交易日标的
-            stock_list_need_init = True
+            load_dfcf()
+
+            detect_mystock_sell_real_addholding(
+                None,
+                index=0, check_buy=False, send2wechat=15
+            )
+            
+            mystock_holding = read_save_mystock_real_addholding(
+                None,
+                index=0,check_buy=False,  send2wechat=10)
+
+            etf_holding = read_save_mystock_real_addholding(None,
+                index=7, check_buy=False, send2wechat=5)
+
+            buy1_holding = read_save_mystock_real_addholding(None,
+                                    index=2, check_buy=False, send2wechat=5)
+            buy2_holding = read_save_mystock_real_addholding(None,
+                                    index=3, check_buy=False, send2wechat=5)
+            pabuy_holding = read_save_mystock_real_addholding(None,
+                                    index=5, check_buy=True, send2wechat=5)
+
+            hot_holding = read_save_mystock_real_addholding(None,
+                                    index=6, check_buy=False, send2wechat=5)
+
+
+            allstock_holding = read_save_mystock_real_addholding(
+                allstock_holding,
+                index=-1, send2wechat=10,
+                is_all_stocks=True, check_buy=True, is_send_mail=True)
+
+            data_change=True
+
+
+        except:
+            write_log_msg()
+
+
+        return count+1
+
+    #检测资金流情况并存盘
+    def check_cap_flow(count=0):
+        global allstock_holding,qsjj_list,djgd_list,tljd_list
+
+        try:
             current_eob = gmTools.get_last_trade_datetime()
-            next_trade_datetime = gmTools.get_next_trade_date(str(current_eob.date()))
+            current_eob=current_eob.hour()*10000+current_eob.minute()*100+current_eob.second()
             # 交易时间未发生变化，继续等待
             # '''
             if current_eob == last_eob:
-
                 if not allstock_holding is None and data_change:
                     data_change = False
                     writer = pd.ExcelWriter('沪深A股' + str(now.date()) + '.xlsx')
@@ -1412,102 +2102,175 @@ def trade_date_loop():
                     writer.save()
                     writer.close()
 
-                time.sleep(5 * 60)
-                continue
+                return count+1
                 # '''
 
             load_dfcf()
             last_eob=current_eob
 
-            allstock_holding = read_save_mystock_real_addholding(allstock_holding,
-                                                                 botton_menu='沪深A股', send2wechat=10,
-                                                                 is_all_stocks=True, check_buy=True, is_send_mail=True)
+            detect_mystock_sell_real_addholding(
+                None,
+                botton_menu='自选股', check_buy=False, send2wechat=15
+            )
+            mystock_holding = read_save_mystock_real_addholding(
+                None,
+                index=0,check_buy=False,  send2wechat=10)
 
-            if count % 3 == 0:
-                buy1_holding = read_save_mystock_real_addholding(buy1_holding,
-                                        botton_menu='1buy', send2wechat=5)
-                buy2_holding = read_save_mystock_real_addholding(buy2_holding,
-                                        botton_menu='2buy', send2wechat=5)
-                pabuy_holding = read_save_mystock_real_addholding(pabuy_holding,
-                                        botton_menu='pabuy', send2wechat=5)
+            etf_holding = read_save_mystock_real_addholding(None,
+                index=7, check_buy=False, send2wechat=5)
 
-            allstock_holding = read_save_mystock_real_addholding(allstock_holding,
-                                    botton_menu='沪深A股', send2wechat=10,
-                                    is_all_stocks=True,check_buy=True,is_send_mail=True)
+            buy1_holding = read_save_mystock_real_addholding(None,
+                                    index=2, check_buy=False, send2wechat=5)
+            buy2_holding = read_save_mystock_real_addholding(None,
+                                    index=3, check_buy=False, send2wechat=5)
+            pabuy_holding = read_save_mystock_real_addholding(None,
+                                    index=5, check_buy=True, send2wechat=5)
+
+            hot_holding = read_save_mystock_real_addholding(None,
+                                    index=6, check_buy=False, send2wechat=5)
+
+
+            allstock_holding = read_save_mystock_real_addholding(
+                allstock_holding,
+                index=-1, send2wechat=10,
+                is_all_stocks=True, check_buy=True, is_send_mail=True)
+
             data_change=True
 
-            if count %5==0 or int_time>1520:
+            if count %5==4 and int_time>trade_stop and data_change:
                 writer = pd.ExcelWriter('沪深A股' + str(now.date()) + '.xlsx')
                 allstock_holding.to_excel(writer, '沪深A股')
                 writer.save()
                 writer.close()
                 data_change=False
-                print('now ',now)
+                print("trade stop,save all data %s"%now)
 
         except:
             write_log_msg()
 
-        count+=1
-        time.sleep(5*60)
 
-#分析最近2000交易日数据，效果不好，不足以指导操作
-def check_washing_in_sh_sz_2_hot():
-    load_dfcf()
-    tmp = read_allstock_real_capflow()['代码'].tolist()
-    stocks=[]
-    for stock in tmp:
-        if stock[0]=='6':
-            stocks.append('SHSE.'+stock)
+        return count+1
+
+    #初始化每日基本参数
+    def init_trade_loop():
+        # 次日凌晨初始化下一交易日标的
+        load_dfcf()
+        favorite_stocks = get_all_stock_in_sh_sz_by_params()  # 指定pe范围的标的
+        favorite_stocks.sort()  # 按代码排序，便于后续使用,6位数字符串
+
+        dailyinit = "dailyinit.txt"
+        if not os.path.isfile(dailyinit):
+            f = open(dailyinit, "wt")
+            tmp = ''
         else:
-            stocks.append('SZSE.' + stock)
+            f = open(dailyinit, "r+")
+            tmp = f.read()
+            f.seek(0)
 
-    now = datetime.datetime.now()
-    print(str(now) + ' caculate washing')
-    add_stock_2_mystock('hot', get_stock_washing(stock_list=stocks,
-        week_in_seconds=4 * 60 * 60,count=30,cacl_reward=True) )
+        if tmp != next_trade_datetime:
+            f.write(next_trade_datetime)
+            f.close()
+            cacl_12buy(favorite_stocks)
+        else:
+            f.close()
+
+    def start():
+        pass
+    #--------start----------------------------------------------------
+    trade_stop=2320
+    trade_start=925
+    check_interval=20
+    buy_check_time=[1000,1100,1330,1430] #buy  point detect time
+
+    count = 0
+    last_eob=0
+
+    stock_list_need_init = True
+    data_change=False
+
+    while True:
+        # 非交易时间段  不做处理
+        now = datetime.datetime.now()
+
+        int_time = now.hour * 100 + now.minute
+        next_trade_datetime =str(now.date()) #str(gmTools.get_next_trade_date(now.date()))  #str(now.date())  # 下一交易日
+
+        #init trade loop every trade day
+        if stock_list_need_init and \
+          next_trade_datetime == str(now.date()):
+            init_trade_loop()
+            stock_list_need_init = False
+            print(str(now) + ' init_trade_loop \n')
+
+        if  int_time>trade_stop or int_time<trade_start :
+            count = 0
+
+            print(str(now)+' waiting to trade\n')
+            time.sleep(check_interval)
+
+            #每个交易日六点自动初始化股票列表
+            if  int_time>600 and  int_time<700  and next_trade_datetime == str(now.date()):
+                count = 0
+                last_eob = 0
+                data_change = False
+                stock_list_need_init = True
+                qsjj_list = None
+                djgd_list = None
+                tljd_list = None
+
+            time.sleep(20*60)
+            continue
+
+        current_eob = gmTools.get_last_trade_datetime()
+        current_eob = current_eob.hour*10000+current_eob.minute*100+current_eob.second
+
+        # 交易时间发生变化才进行实时状态检测  30秒检测一次
+        if current_eob != last_eob:
+            last_eob =current_eob
+
+            #check cap flow every minute
+            read_real_capflow(-1,current_eob)
+            read_real_L2Room(top_menu='强势狙击')
+            read_real_L2Room(top_menu='顶级挂单')
+            read_real_L2Room(top_menu='拖拉机单')
+
+            #buy point detect
+            if int_time in buy_check_time:
+                count=check_addholding(count)
+
+            time.sleep(check_interval)
+        else:
+            time.sleep(60)
+
 
 if __name__ == '__main__':
+    #openGM()
     trade_date_loop()
 
 
-    pass
 
+    # 强势狙击
+    # 顶级挂单
+    # 拖拉机单
     '''
-    a=pd.Series([i for i in range(100)])
-    close_ma_up(a,[5,10,20],5)
-    close_ma_down(a, [5, 10, 20], 5)
+    file_exist('e:\\data\\ticks-600711-20180511.dat')
+    file_exist('e:\\data\\ticks-600711-20180511--.dat')
+    ret = read_real_capflow(1)
+    read_real_L2Room(top_menu='强势狙击')
+    read_real_L2Room(top_menu='顶级挂单')
+    read_real_L2Room(top_menu='拖拉机单')
+    print('\n')
+    print(ret[:1])
+    print(ret[1:2])
 
-    a = pd.Series([50-i for i in range(100)])
-    close_ma_up(a, [5, 10, 20], 5)
-    close_ma_down(a, [5, 10, 20], 5)
+
+    ret = read_real_capflow(2)
+    print('\n')
+    print(ret[:1])
+    print(ret[1:2])
+    cacl_12buy()
     
-    
-    stocks=get_all_stock_in_sh_sz_by_params([5,60])
-    print(stocks[:5])
-    trade_date_loop()
-    check_washing_in_sh_sz_2_hot()
+    load_dfcf()
     load_dfcf_stock_2_mystock()
-    load_dfcf_stock_2_mystock()
-    add_stock_2_mystock('pabuy', add_pazq_stock_2_mystock())
-    add_stock_2_mystock('1buy', get_stock_1buy(STOCK_BLOCK))
-    add_stock_2_mystock('2buy', get_stock_2buy(STOCK_BLOCK))
-    get_stock_washing(block='')
-    
-    add_stock_2_mystock('1buy',['002465','600000'])
-    read_real_period_static(False, 0)
-    read_real_period_static(False, 1)
-    read_real_period_static(True)
-
-    read_real_add_holding(False,0)
-    read_real_add_holding(False,1)
-    read_real_add_holding(True)
-
-    read_real_status(True)
-    read_real_status(False,0)
-    read_real_status(False, 1)
-
-    read_mystock_real_capflow(0)
-    read_mystock_real_capflow(1)
-    read_allstock_real_capflow()
     '''
 

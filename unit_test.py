@@ -1,5 +1,6 @@
 import unittest
 import gmTools as tls
+import readDFCF as dfcf
 import numpy as np
 import pandas as pd
 import os
@@ -7,9 +8,12 @@ import matplotlib.pyplot as plt
 from scipy import optimize
 
 class Test_uint_test(unittest.TestCase):
-    tls.etf_rolling(filters=['CAP-', '.dat'],backtest=True)
-
+    dfcf.read_real_L2Room(top_menu='强势狙击',is_test=True)
+    dfcf.read_real_L2Room(top_menu='拖拉机单', is_test=True)
+    dfcf.read_real_L2Room(top_menu='顶级挂单', is_test=True)
     '''
+    ticks = tls.read_ticks("ticks-600271-20180511.dat")
+    tls.etf_rolling(filters=['CAP-', '.dat'],backtest=True)
     多头选股：条件与：15日内创30日新低，10日内连续缩量，
                 条件或：5日内温和上涨，10日内间歇放量，5日内突然放量
                 东方财富条件选股不好用，改用掘金量化终端自行选择
