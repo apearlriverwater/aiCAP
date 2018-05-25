@@ -21,6 +21,11 @@
     多股同列：实时人工看盘使用。
 
   1.2 大户室数据
+      考虑用于短线操作，监测到连续大幅度的主动性买盘时跟进，次日卖出（最多持仓不要超过3天），相反则采取卖出
+   操作。收集并记录大户室的数据结合ticks数据进行分析，研究此策略的可行性。同时要考虑大盘走势。
+      实时资金流是进行判断分析的基础，需要连续监控实时资金流的变化情况，收集实际成交数据判断市场热度、选择
+   合适的介入对象。
+
   1.2.1 顶级挂单
       包括挂单时间、价格与总数、总金额，附带数据包括市盈率、换手率等参数。考虑用于短线操作。
 
@@ -29,7 +34,9 @@
 
   1.2.3 强势狙击
 
+
   1.2.4 主力踪迹
+        记录最近3个交易日的主力信息。
 
   1.2.5 L2核心内参
 
@@ -99,9 +106,24 @@ import win32clipboard as clipboard
 import datetime,time,re
 import pandas as pd
 import os,stat
+import logging
+import pyHook,pythoncom
+import threading
+import time
+
+
+from multiprocessing import Process, Lock,Pipe,Pool,cpu_count,Queue,freeze_support
+
+
 #import numpy as np
 import gmTools
 #import infWECHAT as wechat
+
+
+logging.basicConfig(level = logging.DEBUG
+                    ,format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 
 '''
 -----------掘金主要指数--------------------------------
@@ -228,6 +250,9 @@ L2Room_top_menu=[
     ['DDE全景',546,62]
 ]
 
+
+
+
 #true file exist ,false file not exist
 def file_exist(file_path):
     try:
@@ -237,13 +262,16 @@ def file_exist(file_path):
         return False
 
 #保存文件，title=True时若文件不存在把第一行作为title否则丢弃第一行
-def write_text_file(file_path,msg,title=''):
+def write_text_file(file_path,msg,title=[]):
 
     def write_list(f,msg):
         for line in  msg:
-            f.write(str(line))
-            #print(str(line))
-            f.write('\n')
+            tmp='%s'%line[0]
+            for item in line[1:]:
+                tmp+='\t%s'%item
+
+            tmp += '\n'
+            f.write(tmp)
 
     #----------------------------------------------------------
     try:
@@ -253,9 +281,13 @@ def write_text_file(file_path,msg,title=''):
             f.close()
         else:
             f = open(file_path, "wt")
-            if title!='':
-                f.write(str(title))
-                f.write('\n')
+            if len(title)>0:
+                msg1=title[0]
+                for item in title[1:]:
+                    msg1+= '\t'+item
+
+                msg1 += '\n'
+                f.write(msg1)
 
             write_list(f,msg)
             f.close()
@@ -402,7 +434,36 @@ def write_log_msg():
     f.close()
     print(traceback.format_exc())
 
+#进程间共享数据的变量，访问前加锁、解锁
+class share_data:
+    def __init__(self):
+        self._lock = Lock()
+        self._data=[]
 
+    def set_data(self,data):
+        self._lock.acquire()
+        self._data.append(data)
+        self._lock.release()
+
+    def get_data(self):
+        self._lock.acquire()
+        data=self._data[-1]
+        self._data = self._data[:-1]
+        self._lock.release()
+        return data
+
+    def clear_data(self):
+        self._lock.acquire()
+        self._data = None
+        self._lock.release()
+
+    def is_empty(self):
+        self._lock.acquire()
+        ret=len(self._data)==0
+        self._lock.release()
+        return ret
+
+capflow =share_data
 class cWindow:
     def __init__(self):
         self._hwnd = None
@@ -448,7 +509,7 @@ def click_dfcf_menu(menu_points=dfcf_top_menu_points,menu_name='首页'):
         for item in menu_points:
             if menu_name==item[0]:
                 pyautogui.click(item[1],item[2])
-                time.sleep(0.1)
+                time.sleep(0.001)
                 return  True
 
         return  False
@@ -487,11 +548,11 @@ def  close_window(caption):
     try:
         hwnd_dfcf = win32gui.FindWindow(None, caption)
         if hwnd_dfcf>0:
-            time.sleep(1)
+            #time.sleep(1)
             win32api.SendMessage(hwnd_dfcf, win32con.WM_CLOSE, 0, 0)  # CLOSE WINDOWS
             ret = True
     except:
-        write_log_msg()
+        #write_log_msg()
         pass
 
     return  ret
@@ -573,7 +634,21 @@ def openDFCF(files=dfcf_main_file):
 def get_text_from_clipboard():
     # 读取剪切板
     clipboard.OpenClipboard()
-    d = clipboard.GetClipboardData(win32con.CF_TEXT)
+    d=b''
+    i=0
+    while True:
+        try:
+            i += 1
+            d += clipboard.GetClipboardData(win32con.CF_TEXT)
+            if d.__len__()<500 and i<5:
+                #logger.debug('retry GetClipboardData')
+                time.sleep(0.1)
+            else:
+                break
+        except:
+            logger.debug('open GetClipboardData')
+            clipboard.OpenClipboard()
+
     clipboard.CloseClipboard()
 
     return d
@@ -591,9 +666,9 @@ def press_keys(key_list):
     for key in key_list:
         for _ in range(key[1]):
             pyautogui.keyDown(key[0])
-            time.sleep(0.05)
+            time.sleep(0.005)
             pyautogui.keyUp(key[0])
-            time.sleep(0.1)
+            time.sleep(0.005)
 
 #模拟人工操作的方式导出东方财富数据
 def export_dfcf_data(click_points,key_list):
@@ -614,21 +689,75 @@ def export_dfcf_data(click_points,key_list):
         for key in key_list:
             for _ in range(key[1]):
                 pyautogui.keyDown(key[0])
-                time.sleep(0.05)
+                #
+                time.sleep(0.01)
                 pyautogui.keyUp(key[0])
-                time.sleep(0.1)
+                time.sleep(0.01)
 
         close_export_window()
 
         #todo 二进制格式的文本待解析
         ret=get_text_from_clipboard()
+
     except:
+        write_log_msg()
         pass
     
     return  ret
 
 #获取字段内容并转成数字类型
-def get_item_from_line(line,value_index=[],non_value_index=[]):
+def get_item_from_line(line,
+    value_index=[],non_value_index=[],is_file=False):
+
+    def get_file_item(next_tab,line):
+        # 丢弃长度为0的字符串
+        if next_tab > 0:
+            item = line[1:next_tab-1]
+            # 数字转换
+            if len(non_value_index) > 0 and not item_index in non_value_index:
+                if item.isdigit():
+                    item = int(item)
+                # 数字中有含单位：亿或万，应去掉
+                elif is_float(item):
+                    item = float(item)
+                elif is_float(item[:-2]):
+                    item = float(item[:-2])
+                    tmp=item[-2:].decode('gbk')
+                    if tmp=='万':
+                        item=item*1e4
+                    elif tmp=='亿':
+                        item = item *1e8
+                else:
+                    item = 0.0
+
+            return item
+
+    def get_item(next_tab,line):
+        # 丢弃长度为0的字符串
+        if next_tab > 0:
+            item = line[:next_tab]
+            # 数字转换
+            if len(non_value_index) > 0 and not item_index in non_value_index:
+                if item.isdigit():
+                    item = int(item)
+                # 数字中有含单位：亿或万，应去掉
+                elif is_float(item):
+                    item = float(item)
+                elif is_float(item[:-2]):
+                    tmp = item[-2:].decode('gbk')
+                    item = float(item[:-2])
+                    if tmp=='万':
+                        item=item*1e4
+                    elif tmp=='亿':
+                        item=item*1e8
+
+                else:
+                    item = 0.0
+            else:
+                item = item.decode('gbk')
+
+            return item
+
     def is_float(str):
         try:
             float(str)
@@ -639,9 +768,12 @@ def get_item_from_line(line,value_index=[],non_value_index=[]):
     data=[]
     try:
         item_index=0
+
+        sep = b'\t'
+
         if len(value_index)>0:
             while len(line)>0:
-                next_tab=line.index(b'\t')
+                next_tab=line.index(sep)
                 #丢弃长度为0的字符串
                 if next_tab>0:
                     item=line[:next_tab]
@@ -668,30 +800,20 @@ def get_item_from_line(line,value_index=[],non_value_index=[]):
                 line=line[next_tab+1:]
         else:
             while len(line)>0:
-                next_tab=line.index(b'\t')
-                #丢弃长度为0的字符串
-                if next_tab>0:
-                    item=line[:next_tab]
-                    #数字转换
-                    if len(non_value_index)>0 and not item_index in non_value_index:
-                        if item.isdigit():
-                            item=int(item)
-                        #数字中有含单位：亿或万，应去掉
-                        elif is_float(item) :
-                            item=float(item)
-                        elif is_float(item[:-2]):
-                            item = float(item[:-2])
-                        else:
-                            item=0.0
-                    else:
-                        item=item.decode('gbk')
+                try:
+                    next_tab=line.index(sep)
+                except:#the last item
+                    next_tab=len(line)-1
 
+                item = get_item(next_tab, line)
+
+                if not item is None:
                     data.append(item)
                     item_index += 1
 
                 line=line[next_tab+1:]
     except:
-        #write_log_msg()
+        write_log_msg()
         pass
 
     return  data
@@ -700,14 +822,24 @@ def get_item_from_line(line,value_index=[],non_value_index=[]):
     dfcf导出的数据格式为文本格式，字段间用tab分隔，每条记录一行用（\n）分隔
     第一行为标题栏，记录各字段名，第二行起是具体内容
 '''
-def format_dfcf_export_text(export_text,values=[],non_values=[],pd_table=True,mul_lines=0):
+def format_dfcf_export_text(export_text,values=[],
+    non_values=[],pd_table=True,mul_lines=0,is_file=False,ret_queue=None):
+
+    t0=time.time()
     index=0
     data_list=[]
     #get title
-    next_end = index + export_text[index:].index(b'\n')
+
+    sep =b'\n'
+
+    try:
+        next_end = index + export_text[index:].index(sep)
+    except:
+        return
+
     line = export_text[index:next_end]
     index = next_end + 1
-    data_list.append(get_item_from_line(line))
+    data_list.append(get_item_from_line(line,is_file=is_file))
 
     #确定数值类型的字段序号
     title=data_list[0]
@@ -720,31 +852,38 @@ def format_dfcf_export_text(export_text,values=[],non_values=[],pd_table=True,mu
 
     if len(values_index)>0:
         while index<len(export_text):
-            next_end=index+export_text[index:].index(b'\n')
+            next_end=index+export_text[index:].index(sep)
             line=export_text[index:next_end]
             index=next_end+1
-            data_list.append(get_item_from_line(line,values_index))
+            data_list.append(get_item_from_line(line,values_index,is_file=is_file))
     elif len(non_values_index)>0:
         while index<len(export_text):
-            next_end=index+export_text[index:].index(b'\n')
+            next_end=index+export_text[index:].index(sep)
             line=export_text[index:next_end]
             index=next_end+1
 
             #双行处理
             if mul_lines==1:
-                next_end = index + export_text[index:].index(b'\n')
+                next_end = index + export_text[index:].index(sep)
                 line += export_text[index:next_end]
                 index = next_end + 1
 
-            data_list.append(get_item_from_line(line,'',non_values_index))
+            data_list.append(get_item_from_line(line,'',non_values_index,is_file=is_file))
 
             # 确定数值类型的字段序号
+
+    #logger.debug('format_dfcf_export_text time=%.2f' % (time.time() - t0))
 
     if pd_table==True:
         data = pd.DataFrame(data_list[1:])
         data.rename(columns={i: title[i] for i in range(len(title))}, inplace=True)
+        if not ret_queue is None:
+            ret_queue.put(data)
         return  data
     else:
+        if not ret_queue is None:
+            ret_queue.put(data_list)
+
         return data_list
 
 
@@ -1014,8 +1153,10 @@ def read_real_add_holding(all_stock=True, index=-1, detect_buy=True):
     return real_status
 
 
-#模拟人工操作的方式导出all实时资金流
+
 '''
+#模拟人工操作的方式导出all实时资金流
+todo 模拟按键序列是影响效率的根本原因，最后能直接进入数据导出模式：
 序	代码	名称	最新	涨幅%	主力净流入	集合竞价	超大单流入	超大单流出	超大单净额	超大单净占比%	大单流入	大单流出	大单净额	大单净占比%	中单流入	中单流出	中单净额	中单净占比%	小单流入	小单流出	小单净额	小单净占比%	
 1	002460	赣锋锂业	72.41	3.47	1.85亿		794		4.69亿		-2.93亿		1.76亿		7.35		8.08亿		-8.00亿		851万		0.36		7.04亿		-8.03亿		-9936万		-4.15		4.05亿		-4.90亿		-8516万		-3.56		
 2	600271	航天信息	26.32	4.49	7526万		141		1.18亿		-5591万		6212万		10.06		1.86亿		-1.73亿		1314万		2.13		1.73亿		-2.08亿		-3464万		-5.61		1.09亿		-1.50亿		-4062万		-6.58
@@ -1030,22 +1171,234 @@ def read_real_add_holding(all_stock=True, index=-1, detect_buy=True):
     结合L2大户室的信息：顶级挂单，拖拉机单，强势狙击和主力踪迹使用，基于资金流的短线操作
 '''
 last_capflow=None
-main_capflow=[]  #主力单数据队列
-def read_real_capflow(index=-1,eob=0):
-    global last_capflow
+main_capflow=None  #主力单数据队列
 
-    title = ['代码', 'eob', '主力净流入', '超大单流入', '超大单流出', '超大单净额', '超大单净占比%',
-            '大单流入', '大单流出', '大单净额', '大单净占比%']
+#资金流类
+class capflow_class:
+
+    def __init__(self):
+        self._capflow=None        #当日实时资金流信息
+        self._addholding=[]     #当日增减仓信息
+        self._dde=[]            #当日dde信息
+        self._propter=[]        #股票基本信息  流通盘、总盘、市盈率等基础参数
+        self._last_cacl_eob=None
+        self._big_buy=[]
+        self._big_sell=[]
+        self._stocks=[]
+        self._lock=Lock()
+
+        #大单分析参数   当前有效记录数，分析起点记录数，主力净流入前xx项
+        self._item_count=0
+        self._week=15
+        self._big_buy_count=200
+
+    def add_flow(self,data,file_path,is_file=False):
+        self._lock.acquire()
+
+        self._last_cacl_eob = data.loc[0, 'eob']
+        self._item_count += 1
+
+        if self._capflow is None:
+            self._capflow = data.copy()
+            if is_file:
+                #get the first time stocks from file
+                self._stocks = data[data['eob']==self._last_cacl_eob]['代码'].values.tolist()
+            else:
+                self._stocks =data['代码'].values.tolist()
+        else:
+            self._capflow = pd.concat([self._capflow , data], ignore_index=True)
+            self._capflow=self._capflow.sort_values(by=['代码','eob'])
+
+        if not is_file:
+            file_path = "e:\\data\\%s-cap-%s.txt" % (file_path, datetime.datetime.now().date())
+            write_text_file(file_path, msg=data.values.tolist(), title=data.columns)
+
+        cur_data=self._capflow.copy()
+        self._lock.release()
+
+        self.detect_big_bs(data=data,cur_data=cur_data,is_file=is_file)
+        self.cacl_dde()
+        self.cacl_dde()
+        self.cacl_flow()
+
+
+    #资金流计算
+    def cacl_flow(self):
+        pass
+
+    # 实时增仓计算
+    def cacl_addholding(self):
+        pass
+
+    # 实时DDE计算
+    def cacl_dde(self):
+        pass
+
+    #大单买卖检测  很好资源，需单独安排进程进行处理
+    def detect_big_bs(self,data,cur_data,is_file=False):
+
+        if self._item_count<self._week:
+            return
+
+        # 基于成交额10周期均值进行检测，按最近一周期的主力净流入成交额与均值比进行逆序、顺序排列
+        # 同步考虑价格因素
+        t0 = time.time()
+        bs = []
+        cols = ['代码', 'eob', '最新', '涨幅%', '主力净流入']
+        cur_eob=data.loc[0,'eob']
+        data = data[data['主力净流入'] > 0]
+        data=data.sort_values(by='主力净流入',ascending=False)
+        data = data[data['涨幅%']<7.0][:self._big_buy_count]
+        to_be_analysed=data['代码'].values.tolist()
+
+        tmp='\n'
+        for stock in to_be_analysed:
+            try:
+                main_data = cur_data[cur_data['代码'] == stock][cols].reset_index()
+                datalen=len(main_data)
+
+                if  datalen< self._week+5:
+                    continue
+
+                if is_file:
+                    start=self._week+5
+                else:
+                    start = datalen-1
+
+                delta =main_data['主力净流入']- main_data['主力净流入'].shift(1)
+                main_data['delta'] =delta
+
+                if False:#is_file:
+                    from pylab import plt
+                    plt.plot(main_data['delta'],label='delta')
+                    ma = delta.rolling(window=self._week, center=False).mean()
+                    plt.plot(ma,label='ma')
+                    plt.legend(loc='upper center', shadow=True, fontsize='x-large')
+                    plt.show()
+
+                for index in range(start,datalen):
+                    ma = delta[index - self._week-1:index].rolling(
+                        window=self._week,
+                        center=False
+                    ).mean().values.tolist()[-1]
+
+                    if (ma>0.01 or ma<-0.01):
+                        new_delta=delta[index-self._week-1:index].values.tolist()[-1]
+                        ratio=abs(int(new_delta/ma))
+                        if ratio>10:
+                            bs.append([cur_eob, stock,ratio])
+                            tmp+=('[eob=%d] stock=%s,ratio=%2d,price:[%.2f],delta=%.2f\n' %(
+                                cur_eob,
+                                stock,ratio,
+                                main_data.loc[index, '涨幅%'],
+                                new_delta)
+                            )
+            except:
+                write_log_msg()
+
+        logger.info("%s detect big bs ,time=%.2f\n\n"%(tmp,time.time()-t0))
+
+def process_real_capflow(real_capflow,pipe,filepath):
+
+
+    while True:
+        try:
+            real_status=pipe.recv()
+            real_capflow.add_flow(real_status,file_path=filepath)
+
+            #todo cacl buy sell point
+
+        except:
+            write_log_msg()
+
+            # 从文件读取数据  效率很低，用分钟级别K线的资金流可能好用
+
+# 不能在进程启动多进程，否则出现死机
+def read_cap_from_file(real_capflow,
+   file_paths=['e:\\data\\沪深A股-cap-2018-05-22.txt']):
+    for file_path in file_paths:
+        try:
+            # get data from capflow file
+            f = open(file_path, "rb")
+            real_status = f.read()
+            f.close()
+
+            # 转成类似dfcf剪辑版内容的模式
+            if True:
+                count = 500000 * 70
+                if len(real_status) > count:
+                    real_status = real_status[:count + real_status[count:].index(b'\n') + 1]
+
+            #real_status = real_status.replace(b',', b'\t')
+            non_values = [u'代码', u'名称']
+
+            # '''
+            # 返回列表，自行处理数据,values='',non_values=''
+            cpus = cpu_count()
+            datalen = int(len(real_status) / cpus)
+
+            args = []
+            last_index = 0
+            index = real_status.index(b'\n') + 1
+            title = real_status[:index]
+            real_status = real_status[index:]
+
+            for i in range(cpus - 1):
+                stop = last_index + datalen
+                index = stop + real_status[stop:].index(b'\n') + 1
+
+                args.append(title + real_status[last_index:index])
+                last_index = index
+
+            args.append(title + real_status[last_index:])
+            freeze_support()
+            tasks = []
+            ret_queue = Queue()
+            #cpus=1
+            #args=[title+real_status]
+            for i in range(cpus):
+                p = Process(target=format_dfcf_export_text,
+                            args=(args[i], [], non_values, True, 0, False, ret_queue))
+                tasks.append(p)
+
+            for task in tasks:
+                task.start()
+
+            real_status = []
+            for _ in tasks:
+                real_status.append(ret_queue.get())
+
+            real_status = pd.concat(real_status)
+            real_status = real_status.reset_index()
+
+            real_capflow.add_flow(real_status, '', is_file=True)
+
+        except:
+            write_log_msg()
+
+
+
+def read_real_capflow(index,pipe,pipe1,pipe2,is_file=False,debug=False,
+        file_paths=['e:\\data\\沪深A股-cap-2018-05-24.txt'] ):
+
+    global last_capflow,main_capflow,capflow,caplock
 
     # 模拟人工操作的方式导出all实时资金流
-    def export_allstock_real_capflow():
-        click_points = [
-            [dfcf_top_menu_points, '沪深排行'],
-            [hs_rank_top_menu, '资金流向'],
-            [hs_rank_botton_menu, '沪深A股'],
-            ['delay', 1],
-            [273, 150]
-        ]
+    def export_allstock_real_capflow(is_first=True):
+        #todo 模拟按键序列是影响效率的根本原因，最后能直接进入数据导出模式：
+        if is_first:
+            click_points = [
+                [dfcf_top_menu_points, '沪深排行'],
+                [hs_rank_top_menu, '资金流向'],
+                [hs_rank_botton_menu, '沪深A股'],
+                ['delay', 1],
+                [273, 150]
+            ]
+        else:
+            click_points = [
+                [273, 150]
+            ]
+
         key_list = [
             ['down', 7],
             ['right', 1],
@@ -1080,39 +1433,95 @@ def read_real_capflow(index=-1,eob=0):
 
         return export_dfcf_data(click_points, key_list)
 
-    #检测大单成交 用于粗略判断近期主力资金趋势与标的
-    def check_big_trade(old_flow,new_flow):
-        delta_flow=(new_flow-old_flow).sort_values(by='主力净流入',ascending=False)
-
+    def start():
         pass
 
     # --------------------------------------------------------------------------------
-    try:
-        if index==-1:
-            real_status =export_allstock_real_capflow()
-            file_path='沪深A股'
-        else:
-            real_status = export_mystock_real_capflow(index=index)
-            file_path=mystock_list[index]
 
-        non_values = [u'代码', u'名称']
+    if  debug:
+        real_capflow = capflow_class()
 
-        # 返回列表，自行处理数据,values='',non_values=''
-        real_status = format_dfcf_export_text(
-            export_text=real_status,
-            values=[],non_values=non_values,pd_table=True
-        )[title]
+    title = ['代码', 'eob', '最新', '涨幅%', '主力净流入',
+             '超大单流入', '超大单流出',# '超大单净额', '超大单净占比%',
+             '大单流入', '大单流出',# '大单净额', '大单净占比%',
+             '中单流入', '中单流出',# '中单净额', '中单净占比%',
+             '小单流入', '小单流出' #, '小单净额', '小单净占比%'
+             ]
 
-        real_status['eob']=eob
-        # check_big_trade(old_cap=last_capflow,new_flow=real_status)
-        last_capflow=real_status.copy()
-        file_path="e:\\data\\%s-cap-%s.txt"%(file_path,datetime.datetime.now().date())
-        write_text_file(file_path,msg=real_status.values.tolist(),title=title)
+    #real mode
+    load_dfcf()
+    trade_star=93000
+    trade_stop=150100
+    relax=[113000,125900]
+    non_values=['代码','名称']
+    first_time=True
 
-        return real_status
+    proc_index=-1
+    while not is_stop:
+        try:
+            t0=time.time()
+            eob=datetime.datetime.now()
+            eob = eob.hour * 10000 + eob.minute * 100 + eob.second
+            #print(datetime.datetime.now())
+            if (eob>relax[0] and eob<relax[1]) or eob<trade_star-1 :
+                logger.debug("waiting to star trade")
+                time.sleep(60)
+                first_time=True
+                continue
 
-    except:
-        pass
+            if  eob>trade_stop :
+                logger.debug("trade stopping")
+                break
+
+            if index==-1:
+                real_status =export_allstock_real_capflow(is_first=first_time)
+                file_path='沪深A股'
+            else:
+                file_path=mystock_list[index]
+                real_status = export_mystock_real_capflow(index=index)
+
+            first_time = False
+            # 返回列表，自行处理数据,values='',non_values=''
+            real_status = format_dfcf_export_text(
+                export_text=real_status,
+                values=[], non_values=non_values, pd_table=True, is_file=False
+            )
+
+            real_status = real_status[real_status['主力净流入'] !=0]
+
+            eob = datetime.datetime.now()
+            eob = eob.hour * 10000 + eob.minute * 100 + eob.second
+
+            real_status['eob'] = eob
+            real_status = real_status[title].reset_index()
+
+            # check_big_trade(old_cap=last_capflow,new_flow=real_status)
+            last_capflow = real_status.copy()
+
+            if not debug:
+                proc_index = proc_index + 1
+                tmp=("\n[%d]send  real_status! %.2f\n" % (proc_index,time.time() - t0))
+                if proc_index==0:
+                    pipe.send(real_status)
+                elif proc_index==1:
+                    pipe1.send(real_status)
+                else:
+                    pipe2.send(real_status)
+                    proc_index=-1
+
+
+
+            else:
+                real_capflow.add_flow(real_status,file_path=file_path)
+
+            logger.debug("%sread real cap end! %.2f\n"%(tmp,time.time()-t0))
+
+        except:
+            write_log_msg()
+            show_dfcf()
+            first_time = True
+
+    print("read_real_capflow process end!")
 
 #每个交易日开始前或闭市后计算一次即可，实时的DDE数据可通过实时资金流自行计算
 def read_real_DDE(index=-1):
@@ -1175,6 +1584,7 @@ def read_real_DDE(index=-1):
     return real_status
 
 '''
+获取各种挂单信息太费时间，不如基于资金流直接计算买卖强度
 L2Room_top_menu=[
     
     ['顶级挂单',127,62],顶级挂单是指委托挂单在9000手以上的挂单，一般都为大主力所为，
@@ -2095,7 +2505,7 @@ def trade_date_loop():
             # 交易时间未发生变化，继续等待
             # '''
             if current_eob == last_eob:
-                if not allstock_holding is None and data_change:
+                if not allstock_holding is None:
                     data_change = False
                     writer = pd.ExcelWriter('沪深A股' + str(now.date()) + '.xlsx')
                     allstock_holding.to_excel(writer, '沪深A股')
@@ -2110,7 +2520,7 @@ def trade_date_loop():
 
             detect_mystock_sell_real_addholding(
                 None,
-                botton_menu='自选股', check_buy=False, send2wechat=15
+                index=0, check_buy=False, send2wechat=15
             )
             mystock_holding = read_save_mystock_real_addholding(
                 None,
@@ -2154,6 +2564,7 @@ def trade_date_loop():
     #初始化每日基本参数
     def init_trade_loop():
         # 次日凌晨初始化下一交易日标的
+        # openGM()
         load_dfcf()
         favorite_stocks = get_all_stock_in_sh_sz_by_params()  # 指定pe范围的标的
         favorite_stocks.sort()  # 按代码排序，便于后续使用,6位数字符串
@@ -2176,10 +2587,11 @@ def trade_date_loop():
 
     def start():
         pass
+
     #--------start----------------------------------------------------
-    trade_stop=2320
+    trade_stop=1503
     trade_start=925
-    check_interval=20
+    check_interval=0  #连续采集资金流数据，其他数据通过计算获得
     buy_check_time=[1000,1100,1330,1430] #buy  point detect time
 
     count = 0
@@ -2229,30 +2641,109 @@ def trade_date_loop():
             last_eob =current_eob
 
             #check cap flow every minute
-            read_real_capflow(-1,current_eob)
+            #logger.debug('read_real_capflow start %s'%(datetime.datetime.now().time()))
+            #read_real_capflow(-1,current_eob)
+            #logger.debug('read_real_capflow start %s' % (datetime.datetime.now().time()))
+
+            '''
+            获取各种挂单信息太费时间，不如基于资金流直接计算买卖强度
+            print('强势狙击', datetime.datetime.now().time())
             read_real_L2Room(top_menu='强势狙击')
+
+            print('顶级挂单', datetime.datetime.now().time())
             read_real_L2Room(top_menu='顶级挂单')
+
+            print('拖拉机单', datetime.datetime.now().time())
             read_real_L2Room(top_menu='拖拉机单')
 
             #buy point detect
             if int_time in buy_check_time:
                 count=check_addholding(count)
+            '''
 
             time.sleep(check_interval)
         else:
             time.sleep(60)
 
 
+def read_dfcf_real_cap(index):
+    if index == -1:
+        file_path = '沪深A股'
+    else:
+        file_path = mystock_list[index]
+
+    (ppReadCap, ppCaclCap) = Pipe()
+
+    (ppReadCap1, ppCaclCap1) = Pipe()
+    (ppReadCap2, ppCaclCap2) = Pipe()
+
+    # p1=Process(target=trade_date_loop, args=())
+
+    # read_real_capflow(index,pipe,is_file=False,debug=False,
+    #    file_paths=['e:\\data\\etf-cap-2018-05-18.txt'] ):
+    p2 = Process(target=read_real_capflow,
+                 args=(index, ppReadCap,ppReadCap1,ppReadCap2,
+                       False, False,['e:\\data\\沪深A股-cap-2018-05-24.txt'])
+                 )
+    real_capflow = capflow_class()
+
+    #大单检测很耗时间，用三个进程进行处理
+    p3 = Process(target=process_real_capflow, args=(real_capflow,ppCaclCap,file_path))
+
+    p4 = Process(target=process_real_capflow, args=(real_capflow,ppCaclCap1, file_path))
+    p5 = Process(target=process_real_capflow, args=(real_capflow, ppCaclCap2, file_path))
+
+    # p1.start()
+    p2.start()
+    p3.start()
+    p4.start()
+    p5.start()
+
+    # p1.join()
+    p2.join()
+    p3.join()
+    p4.join()
+    p5.join()
+
+is_stop=False
+is_pause=False
+
+def on_char(event):
+    global  is_stop,is_pause
+
+    if event.Key=='P':
+        is_pause=not is_pause
+        print('is_pause')
+        time.sleep(0.5)
+    elif event.Key=='Q':
+        is_stop = not is_stop
+        print('is_stop')
+        time.sleep(0.5)
+
+    return True
+
+def hook_keyboard():
+    hm = pyHook.HookManager()
+    hm.KeyDown=on_char
+    hm.HookKeyboard()
+    print("waiting key event")
+    # 进入循环，如不手动关闭
+    pythoncom.PumpMessages()
+
+capflow=[]
+caplock=Lock()
 if __name__ == '__main__':
-    #openGM()
-    trade_date_loop()
+    #threading.Thread(target=hook_keyboard, name='hook_keyboard').start()
+    read_dfcf_real_cap(index=-1)
 
 
 
-    # 强势狙击
-    # 顶级挂单
-    # 拖拉机单
     '''
+    
+    real_capflow = capflow_class()
+    read_cap_from_file(real_capflow=real_capflow,
+                      file_paths=['e:\\data\\沪深A股-cap-2018-05-24.txt'] )
+    read_real_capflow(index=-1,pipe=None,is_file= True,debug= True)
     file_exist('e:\\data\\ticks-600711-20180511.dat')
     file_exist('e:\\data\\ticks-600711-20180511--.dat')
     ret = read_real_capflow(1)
@@ -2272,5 +2763,7 @@ if __name__ == '__main__':
     
     load_dfcf()
     load_dfcf_stock_2_mystock()
-    '''
+    
+    
+        '''
 

@@ -240,7 +240,6 @@ def main():
     hm.MouseRightDown=onMouseRightDown
     hm.MouseLeftDown = onMouse_leftdown
     hm.MouseLeftUp = onMouse_leftup
-
     hm.HookMouse()
 
     # 进入循环，如不手动关闭，2

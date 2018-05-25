@@ -47,8 +47,8 @@ def worker(input, output):
 
 def calculate(func, args):
     result = func(*args)
-    return '%s says that %s%s = %s' % \
-        (current_process().name, func.__name__, args, result)
+    return '[%s] %s says that %s%s = %s' % \
+        (time.time(), current_process().name, func.__name__, args, result)
 
 #
 # Functions referenced by tasks
@@ -67,7 +67,7 @@ def plus(a, b):
 #
 
 def test():
-    NUMBER_OF_PROCESSES = 4
+    NUMBER_OF_PROCESSES = multiprocessing.cpu_count()
     TASKS1 = [(mul, (i, 7)) for i in range(20)]
     TASKS2 = [(plus, (i, 8)) for i in range(10)]
 
@@ -88,6 +88,7 @@ def test():
     for i in range(len(TASKS1)):
         print('\t', done_queue.get())
 
+    print('TASKS2 results:')
     # Add more tasks using `put()`
     for task in TASKS2:
         task_queue.put(task)
@@ -100,14 +101,11 @@ def test():
     for i in range(NUMBER_OF_PROCESSES):
         task_queue.put('STOP')
 
-
-
-
-
 lock = multiprocessing.Lock()  # 一个锁
 
 
 def a(x):  # 模拟需要重复执行的函数
+    t0=time.time()
     lock.acquire()  # 输出时候上锁，否则进程同时输出时候会混乱，不可读
     print('开始进程：', os.getpid(), '输入参数:', x)
     lock.release()
@@ -119,30 +117,29 @@ def a(x):  # 模拟需要重复执行的函数
             tmp=tmp*tmp*tmp*tmp
 
     lock.acquire()
-    print( '\n结束进程：', os.getpid(), '预测下一个进程启动会使用该进程号')
+    print( '\n[%d] 结束进程,run time=%.3f\n'%( os.getpid(), time.time()-t0))
     lock.release()
+
 def test_a():
+    print('start at ：', datetime.datetime.now())
     list = []
-    for i in range(20):  # 产生一个随机数数组，模拟每次调用函数需要的输入，这里模拟总共有10组需要处理
-        list.append(i * 9000)
+    for i in range(10):  # 产生一个随机数数组，模拟每次调用函数需要的输入，这里模拟总共有10组需要处理
+        list.append(int(random.random() * 900))
 
     print('参数：', list)
-    pool = multiprocessing.Pool(processes=4)  # 限制并行进程数为4
+    pool = multiprocessing.Pool()  # 限制并行进程数为4  processes=4
 
     # 创建进程池，调用函数a，传入参数为list,此参数必须是一个可迭代对象,因为map是在迭代创建每个进程
     pool.map(a, list)
 
-    while True:
-        sleep(7)
+    print('end at ：', datetime.datetime.now())
 
-        lock.acquire()
-        print('now time ：', datetime.datetime.time())
-        lock.release()
+
 
 
 if __name__ == '__main__':
     freeze_support()
-    test()
+    test_a()
 
 
 

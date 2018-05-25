@@ -8,10 +8,19 @@ import matplotlib.pyplot as plt
 from scipy import optimize
 
 class Test_uint_test(unittest.TestCase):
-    dfcf.read_real_L2Room(top_menu='强势狙击',is_test=True)
-    dfcf.read_real_L2Room(top_menu='拖拉机单', is_test=True)
-    dfcf.read_real_L2Room(top_menu='顶级挂单', is_test=True)
+    tls.cacl_ticks_cap()
+
     '''
+    tls.cacl_bs_by_cap(cap_path='e:\\data\\day-data',
+                   filters=['CAP-000661', '000.dat'],
+                   ma=[5, 10, 20], nBuyLastWeek=4, nSellLastWeek=6,
+                   rsi_low=20, rsi_up=80)
+                   
+    tls.stocks_rolling(cap_path='e:\\data\\day-data',
+                       filters=['CAP-', '.dat'],
+                       stocks=[],
+                       backtest=True,view_ta=False)
+                       
     ticks = tls.read_ticks("ticks-600271-20180511.dat")
     tls.etf_rolling(filters=['CAP-', '.dat'],backtest=True)
     多头选股：条件与：15日内创30日新低，10日内连续缩量，
@@ -62,7 +71,7 @@ class Test_uint_test(unittest.TestCase):
         return stock_long
 
     def test_cacl_cap(self, cap_path='data0322'):
-        tls.cacl_bs_by_cap()
+        
     def test_cacl_cap(self, cap_path='data0322'):
         tls.cacl_bs_by_cap()
     
@@ -135,17 +144,6 @@ class Test_uint_test(unittest.TestCase):
         def test_read_cap(self):
         tls.cacl_bs_by_cap()   
     '''
-
-
-    #def test_read_ticks(self):
-    #    tick_file_path='e:/data/ticks-000001-20180201.dat'
-    #    ticks=tls.read_ticks(tick_file_path)
-    #    print(ticks[:3])
-    #    print(ticks[-3:])
-        
-
-
-
 
 if __name__ == '__main__':
     unittest.main()
